@@ -1,0 +1,53 @@
+{
+ "storage": [
+  [
+   "rewardToken",
+   "0",
+   0,
+   "t_contract(IERC20)"
+  ],
+  [
+   "genesis",
+   "1",
+   0,
+   "t_uint256"
+  ],
+  [
+   "epochLength",
+   "2",
+   0,
+   "t_uint256"
+  ],
+  [
+   "isRecorder",
+   "3",
+   0,
+   "t_mapping(t_address,t_bool)"
+  ],
+  [
+   "epochRewards",
+   "4",
+   0,
+   "t_mapping(t_uint256,t_uint256)"
+  ],
+  [
+   "epochPoints",
+   "5",
+   0,
+   "t_mapping(t_uint256,t_uint256)"
+  ],
+  [
+   "userPoints",
+   "6",
+   0,
+   "t_mapping(t_uint256,t_mapping(t_address,t_uint256))"
+  ],
+  [
+   "claimed",
+   "7",
+   0,
+   "t_mapping(t_uint256,t_mapping(t_address,t_bool))"
+  ]
+ ],
+ "structs": {}
+}

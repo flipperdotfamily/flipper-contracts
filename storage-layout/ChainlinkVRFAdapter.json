@@ -1,0 +1,29 @@
+{
+ "storage": [
+  [
+   "wrapper",
+   "0",
+   0,
+   "t_contract(IVRFV2PlusWrapper)"
+  ],
+  [
+   "requestConfirmations",
+   "0",
+   20,
+   "t_uint16"
+  ],
+  [
+   "consumer",
+   "1",
+   0,
+   "t_address"
+  ],
+  [
+   "extraArgs",
+   "2",
+   0,
+   "t_bytes_storage"
+  ]
+ ],
+ "structs": {}
+}

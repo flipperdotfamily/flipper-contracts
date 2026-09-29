@@ -1,0 +1,23 @@
+{
+ "storage": [
+  [
+   "entropy",
+   "0",
+   0,
+   "t_contract(IEntropyV2)"
+  ],
+  [
+   "provider",
+   "1",
+   0,
+   "t_address"
+  ],
+  [
+   "consumer",
+   "2",
+   0,
+   "t_address"
+  ]
+ ],
+ "structs": {}
+}

@@ -1,0 +1,629 @@
+Edge schedule (held, not applied): base win chance and $FLIPPER payout sliding from 45% x 2.05x to 47.5% x 2.0x as
+the house treasury grows from 2x to 6x of the launch treasury. Held because keying it on the treasury's $FLIPPER
+multiple is flawed (see the tokenomics model); re-key `_baseTerms()` (FlipperHouseBase) before applying.
+Applies on top of the drawdown-scaled Kelly tree:  git apply --directory=contracts contracts/patches/edge-schedule.diff
+(test/EdgeSchedule.t.sol also repeats the Kelly tests of test/KellySchedule.t.sol; drop those when applying.)
+Storage: appends `EdgeSchedule public edgeSchedule` (one slot) after `kellyDdEndBps`.
+
+--- a/src/house/FlipperHouseBase.sol
++++ b/src/house/FlipperHouseBase.sol
+@@ -102,6 +102,19 @@
+         // reserved for per-token overrides (0 = the global parameter); not used yet
+         uint128 maxLiability; // per-token max bet (e.g. a token's max-transaction cap)
+         uint32 callbackGasLimit; // per-token callback gas class (Pyth charges per reserved callback gas)
++    }
++
++    /// @dev The edge schedule: the base win chance and the $FLIPPER payout slide from their start to their end values
++    ///      as the treasury grows from `fromBps` to `toBps` of `refTreasury` (multiples in bps: 20000 = 2×), linearly,
++    ///      and back as it shrinks. The treasury is the house's own $FLIPPER accounting: no price is read.
++    struct EdgeSchedule {
++        uint128 refTreasury; // the launch treasury; 0 = off (Params' baseWinChanceBps / flipperPayoutBps)
++        uint32 fromBps;
++        uint32 toBps;
++        uint16 winStartBps;
++        uint16 winEndBps;
++        uint16 payoutStartBps;
++        uint16 payoutEndBps;
+     }
+ 
+     /// @dev a flip's partner attribution, fixed at flip time
+@@ -242,6 +255,8 @@
+     uint16 public kellyMinBps;
+     uint16 public kellyDdStartBps;
+     uint16 public kellyDdEndBps;
++    /// @notice the edge schedule (see `EdgeSchedule`)
++    EdgeSchedule public edgeSchedule;
+ 
+     // ─────────────────────────────────────────────────────────────────────────────────────────────────────
+     // Events / errors
+@@ -311,6 +326,7 @@
+     event LockMinTreasurySet(uint256 amount);
+     event NavAthReset(uint256 oldAth, uint256 newAth, uint256 navPerUnit, address indexed caller);
+     event FlipLimitsSet(uint256 maxOpenPerPlayer, uint256 minLiability);
++    event EdgeScheduleSet(EdgeSchedule schedule);
+     event KellyScheduleSet(uint256 maxBps, uint256 minBps, uint256 ddStartBps, uint256 ddEndBps);
+ 
+     error FlipRejected(uint8 code);
+@@ -354,6 +370,19 @@
+     // Shared helpers
+     // ─────────────────────────────────────────────────────────────────────────────────────────────────────
+ 
++    /// @dev the base win chance and the $FLIPPER payout now (the edge schedule, or Params' values when it is off)
++    function _baseTerms() internal view returns (uint256 win, uint256 payout) {
++        EdgeSchedule memory s = edgeSchedule;
++        if (s.refTreasury == 0) return (_params.baseWinChanceBps, _params.flipperPayoutBps);
++        uint256 x = Math.mulDiv(treasury, BPS, s.refTreasury); // the treasury as a multiple of the reference, bps
++        uint256 t = x <= s.fromBps ? 0 : x >= s.toBps ? BPS : (x - s.fromBps) * BPS / (s.toBps - s.fromBps);
++        return (_lerp(s.winStartBps, s.winEndBps, t), _lerp(s.payoutStartBps, s.payoutEndBps, t));
++    }
++
++    function _lerp(uint256 a, uint256 b, uint256 t) internal pure returns (uint256) {
++        return a <= b ? a + (b - a) * t / BPS : a - (a - b) * t / BPS;
++    }
++
+     /// @dev the Kelly multiplier now: `Params.kellyBps`, backed off linearly with the drawdown (see `kellyMinBps`);
+     ///      the max until the drawdown check is live (an ATH, a treasury at or above `lockMinTreasury`)
+     function _kelly() internal view returns (uint256 k) {
+@@ -444,7 +473,7 @@
+         uint256 cap = unres * pr.maxBetBps / BPS;
+         uint256 k = _kelly();
+         if (k == 0) return cap;
+-        uint256 payout = pr.flipperPayoutBps;
++        (, uint256 payout) = _baseTerms();
+         uint256 q = BPS - p;
+         uint256 e = _edge(isFlipper, p, s, b, payout);
+         uint256 sh = shareBps < e ? shareBps : e;
+--- a/src/FlipperHouse.sol
++++ b/src/FlipperHouse.sol
+@@ -119,7 +119,7 @@
+             sellQuote: pv.sellQuote.toUint128(),
+             buyQuote: pv.buyQuote.toUint128(),
+             requestId: requestId,
+-            payoutBps: _params.flipperPayoutBps
++            payoutBps: uint16(_flipperPayout())
+         });
+         flipIdByRequest[requestId] = flipId;
+         if (tag.partnerId != 0) {
+@@ -182,7 +182,7 @@
+         if (!ok || id == 0 || id > type(uint32).max || cut > BPS || disc > BPS) return (tag, 0, 0, 0);
+         Params memory p = _params;
+         bool isFlipper = token == address(flipper);
+-        uint256 winPayout = isFlipper ? p.flipperPayoutBps : 2 * BPS;
++        uint256 winPayout = isFlipper ? _flipperPayout() : 2 * BPS;
+         // expected profit (bps of value) at the flip's odds, before the partner
+         uint256 e = isFlipper
+             ? BPS - Math.mulDiv(pv.winChanceBps, winPayout, BPS, Math.Rounding.Ceil)
+@@ -367,6 +367,7 @@
+ 
+     function _evaluate(address token, uint256 amount, bool withFee) internal returns (Preview memory pv) {
+         Params memory p = _params;
++        (uint256 base, uint256 payout) = _baseTerms();
+         pv.maxLiability = maxLiability();
+         if (withFee) pv.randomnessFee = randomness.fee(_callbackGas(token));
+ 
+@@ -386,8 +387,10 @@
+         if (token == address(flipper)) {
+             pv.sellQuote = amount;
+             pv.buyQuote = amount;
+-            pv.winChanceBps = p.baseWinChanceBps;
+-            pv.liability = Math.mulDiv(amount, p.flipperPayoutBps - BPS, BPS, Math.Rounding.Ceil);
++            // the edge never below the floor, whatever the schedule's shape between its endpoints
++            uint256 maxWin = (BPS - p.minHouseEdgeBps) * BPS / payout;
++            pv.winChanceBps = base < maxWin ? base : maxWin;
++            pv.liability = Math.mulDiv(amount, payout - BPS, BPS, Math.Rounding.Ceil);
+         } else {
+             TokenConfig storage tc = _tokens[token];
+             if (!tc.enabled) {
+@@ -416,7 +419,7 @@
+             uint256 floorOdds = BPS > pv.routeCostBps + p.minHouseEdgeBps
+                 ? (BPS - pv.routeCostBps - p.minHouseEdgeBps) / 2
+                 : 0;
+-            pv.winChanceBps = Math.min(p.baseWinChanceBps, floorOdds);
++            pv.winChanceBps = Math.min(base, floorOdds);
+             pv.liability = Math.mulDiv(b, TOKEN_FALLBACK_BPS, BPS, Math.Rounding.Ceil);
+         }
+ 
+@@ -427,11 +430,25 @@
+         // the bet size is judged after the partner discount and share are known: `_capBet`
+     }
+ 
++    /// @notice The base win chance now (the edge schedule's, before route costs and partner discounts).
++    function currentBaseWinChanceBps() external view returns (uint256 w) {
++        (w,) = _baseTerms();
++    }
++
++    /// @notice The $FLIPPER payout now (the edge schedule's); a flip keeps the one it was made at.
++    function currentFlipperPayoutBps() external view returns (uint256) {
++        return _flipperPayout();
++    }
++
+     /// @notice The Kelly multiplier now (drawdown-scaled).
+     function currentKellyBps() external view returns (uint256) {
+         return _kelly();
+     }
+ 
++    function _flipperPayout() internal view returns (uint256 payout) {
++        (, payout) = _baseTerms();
++    }
++
+     /// @notice Randomness fee (native ETH) for flipping `token` ($FLIPPER flips use a smaller callback budget).
+     function randomnessFeeFor(address token) external view returns (uint256) {
+         return randomness.fee(_callbackGas(token));
+@@ -635,6 +652,10 @@
+         _delegate();
+     }
+ 
++    function setEdgeSchedule(EdgeSchedule calldata) external {
++        _delegate();
++    }
++
+     function setKellySchedule(uint16, uint16, uint16, uint16) external {
+         _delegate();
+     }
+--- a/src/house/HouseModule.sol
++++ b/src/house/HouseModule.sol
+@@ -44,6 +44,26 @@
+         maxOpenPerPlayer = DEFAULT_MAX_OPEN_PER_PLAYER;
+     }
+ 
++    /// @notice Owner: the edge schedule (see `EdgeSchedule`; `refTreasury` 0 turns it off). Both ends must keep the
++    ///         win chance within [minWinChanceBps, 49%], the $FLIPPER payout within [2×, 2.15×] and the house edge at
++    ///         or above `minHouseEdgeBps` on token and $FLIPPER flips; `fromBps` < `toBps`.
++    function setEdgeSchedule(EdgeSchedule calldata s) external onlyOwner onlyDelegateCall {
++        if (s.refTreasury != 0) _checkSchedule(_params, s);
++        edgeSchedule = s;
++        emit EdgeScheduleSet(s);
++    }
++
++    function _checkSchedule(Params memory p, EdgeSchedule memory s) internal pure {
++        if (s.fromBps >= s.toBps) revert InvalidParams();
++        _checkTerms(p, s.winStartBps, s.payoutStartBps);
++        _checkTerms(p, s.winEndBps, s.payoutEndBps);
++    }
++
++    function _checkTerms(Params memory p, uint256 w, uint256 pay) internal pure {
++        if (w < p.minWinChanceBps || w > 4900 || pay < 2 * BPS || pay > 21_500) revert InvalidParams();
++        if (2 * w + p.minHouseEdgeBps > BPS || w * pay > (BPS - p.minHouseEdgeBps) * BPS) revert InvalidParams();
++    }
++
+     /// @notice Owner: the drawdown-scaled Kelly multiplier — `maxBps` (written to `Params.kellyBps`) until a drawdown of
+     ///         `ddStartBps`, sliding to `minBps` at `ddEndBps` (at most the breaker's 50%). 0 < min ≤ max ≤ 100%.
+     function setKellySchedule(uint16 maxBps, uint16 minBps, uint16 ddStartBps, uint16 ddEndBps)
+@@ -262,6 +282,9 @@
+         if (p.kellyBps == 0 || p.kellyBps > BPS) revert InvalidParams();
+         if (p.kellyBps < kellyMinBps) revert InvalidParams();
+         _params = p;
++        // the edge schedule must still fit the new bounds (e.g. a raised minWinChanceBps)
++        EdgeSchedule memory s = edgeSchedule;
++        if (s.refTreasury != 0) _checkSchedule(p, s);
+         emit ParamsUpdated(p);
+     }
+ 
+--- a/src/lens/FlipperLens.sol
++++ b/src/lens/FlipperLens.sol
+@@ -232,7 +232,7 @@
+         external
+         returns (uint256 amount, FlipperHouseBase.Preview memory pv)
+     {
+-        uint256 base = h.params().baseWinChanceBps;
++        uint256 base = h.currentBaseWinChanceBps(); // the edge schedule's, now
+         FlipperHouseBase.Preview memory top = h.previewFlip(token, hi);
+         if (_ok(top, base, baseOdds)) return (hi, top);
+         uint256 lo = 0; // never too big: accepted (then `amount == lo`) or too small
+--- a/script/lib/RobinhoodAddresses.sol
++++ b/script/lib/RobinhoodAddresses.sol
+@@ -157,6 +157,19 @@
+     uint16 internal constant KELLY_DD_START_BPS = 0;
+     uint16 internal constant KELLY_DD_END_BPS = 5000;
+ 
++    /// @notice The edge schedule: 45% × 2.05× (a 7.75% $FLIPPER edge, 10% gross on token flips) while the treasury is
++    ///         under 2× the launch treasury `ref`, sliding linearly to 47.5% × 2.0× (5% on both) at 6×, and back as it
++    ///         shrinks. The treasury is the house's own $FLIPPER accounting: nothing priced, nothing to manipulate.
++    function edgeSchedule(uint128 ref) internal pure returns (FlipperHouseBase.EdgeSchedule memory s) {
++        s.refTreasury = ref;
++        s.fromBps = 20_000;
++        s.toBps = 60_000;
++        s.winStartBps = 4500;
++        s.winEndBps = 4750;
++        s.payoutStartBps = 20_500;
++        s.payoutEndBps = 20_000;
++    }
++
+     /// @notice at most this many flips per player waiting for randomness (the adapter's open-request cap is global)
+     uint16 internal constant MAX_OPEN_PER_PLAYER = 4;
+     /// @notice the smallest liability a flip may carry: 50,000 $FLIPPER ≈ $0.34 at the $6.9k launch FDV, about five of
+--- a/script/Deploy.s.sol
++++ b/script/Deploy.s.sol
+@@ -214,7 +214,9 @@
+         }
+         // the drawdown check runs once the treasury holds at least a tenth of the seed
+         s.house.setLockMinTreasury(uint128(s.house.treasury() / 10));
+-        // Kelly backs off from half to quarter as the drawdown nears the breaker
++        // the edge slides from 7.75% to 5% as the treasury grows from 2× to 6× of today's (the lock's stake), and Kelly
++        // backs off from half to quarter as the drawdown nears the breaker
++        s.house.setEdgeSchedule(RobinhoodAddresses.edgeSchedule(uint128(s.house.treasury())));
+         s.house.setKellySchedule(
+             RobinhoodAddresses.KELLY_BPS,
+             RobinhoodAddresses.KELLY_MIN_BPS,
+--- a/test/LensMaxStake.t.sol
++++ b/test/LensMaxStake.t.sol
+@@ -21,6 +21,10 @@
+         p.baseWinChanceBps = 4500;
+     }
+ 
++    function currentBaseWinChanceBps() external pure returns (uint256) {
++        return 4500;
++    }
++
+     function previewFlip(address, uint256 amount) external view returns (FlipperHouseBase.Preview memory pv) {
+         pv.winChanceBps = 4500;
+         pv.code = amount < minOk ? 2 : (amount > maxOk ? 7 : 0);
+--- a/test/sim/LensMinLiability.t.sol
++++ b/test/sim/LensMinLiability.t.sol
+@@ -21,6 +21,10 @@
+         p.baseWinChanceBps = 4500;
+     }
+ 
++    function currentBaseWinChanceBps() external pure returns (uint256) {
++        return 4500;
++    }
++
+     function previewFlip(address, uint256 amount) external view returns (FlipperHouseBase.Preview memory pv) {
+         pv.winChanceBps = 4500;
+         pv.code = amount < minOk ? 2 : (amount > maxOk ? 7 : 0);
+--- a/README.md
++++ b/README.md
+@@ -77,6 +77,8 @@
+ 
+ ## Economics (defaults, owner-tunable within hard bounds)
+ 
++At launch (the edge schedule below moves these as the treasury grows):
++
+ | | $FLIPPER flips | Token flips |
+ |---|---|---|
+ | Win chance | 45% | 45% while route cost ≤ 8%, then `(1 − h − 2%)/2` (≥ 40%) |
+@@ -85,6 +87,29 @@
+ | To $FLIPPER holders | half of it | half of it |
+ | Max liability per flip | half Kelly: 2.08% of the free bankroll (a ~1.99% stake) | half Kelly: 0.6–2.75% (by route cost), ≤ 5% |
+ 
++### Edge schedule
++
++The base win chance and the $FLIPPER payout slide with the size of the treasury (`setEdgeSchedule`, owner):
++
++| treasury (× the launch treasury, `refTreasury` = 150M) | base win chance | $FLIPPER payout | $FLIPPER edge | token edge (free route) |
++|---|---|---|---|---|
++| below 2× | 45% | 2.05× | 7.75% | 10% |
++| 4× | 46.25% | 2.025× | 6.34% | 7.5% |
++| 6× and above | 47.5% | 2.0× | 5% | 5% |
++
++Linear in between, and back again as the treasury shrinks: the house is deliberately more protective in a drawdown.
++A flip keeps the odds and payout it was made at. The schedule sets only the base: route costs (the chance-based
++fee), the minimum edge (`minHouseEdgeBps`, 2%, enforced on every flip, also between the schedule's endpoints) and
++partner discounts still apply on top. The owner sets every value within bounds: win chances within
++[`minWinChanceBps`, 49%], payouts within [2×, 2.15×], the edge at both ends at or above `minHouseEdgeBps`, and
++from < to. `refTreasury` 0 turns it off (then Params' `baseWinChanceBps` / `flipperPayoutBps` apply). Views:
++`currentBaseWinChanceBps()`, `currentFlipperPayoutBps()`, `edgeSchedule()`.
++
++The metric is the house's own `treasury` in $FLIPPER, not a USD value: it reads no price, pool or oracle, so a flash
++loan or a pool manipulation can't move the odds. An inflow can: a donation is a gift to the bankroll that buys
++far less expected value than it costs (at most 2.75% of each capped stake), and a vault deposit is locked for 30 days
++while every flip stays negative for the player (at least a 5% edge at the schedule's end, 2% after route costs).
++
+ ### Max bet: half Kelly
+ 
+ Each flip's liability is capped at `min(maxBetBps, kellyBps × f*)` of the unreserved bankroll (`treasury −
+--- /dev/null
++++ b/test/EdgeSchedule.t.sol
+@@ -0,0 +1,312 @@
++// SPDX-License-Identifier: MIT
++pragma solidity 0.8.26;
++
++import {stdStorage, StdStorage} from "forge-std/Test.sol";
++import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
++import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
++import {IPoolManager} from "v4-core/interfaces/IPoolManager.sol";
++import {IHooks} from "v4-core/interfaces/IHooks.sol";
++import {PoolKey} from "v4-core/types/PoolKey.sol";
++import {Currency} from "v4-core/types/Currency.sol";
++import {TickMath} from "v4-core/libraries/TickMath.sol";
++import {PartnerBase} from "./Partner.t.sol";
++import {FlipperHouse} from "../src/FlipperHouse.sol";
++import {FlipperHouseBase} from "../src/house/FlipperHouseBase.sol";
++import {TreasuryVault} from "../src/TreasuryVault.sol";
++
++/// @notice The edge schedule (base odds and the $FLIPPER payout slide from 45% × 2.05× to 47.5% × 2.0× as the treasury
++///         grows from 2× to 6× of the launch treasury) and the drawdown-scaled Kelly (half Kelly down to quarter Kelly
++///         at the breaker's 50%).
++contract SchedulesTest is PartnerBase {
++    using stdStorage for StdStorage;
++
++    StdStorage internal store;
++    uint256 internal constant M = 1_000_000 ether;
++    uint256 internal constant WAD = 1e18;
++    uint256 internal constant REF = 100 * M; // FlipperBase's bankroll
++
++    MockERC20 internal t0; // a free route
++    MockERC20 internal t10; // ~9.8% route cost
++
++    function setUp() public override {
++        super.setUp();
++        vm.startPrank(owner);
++        house.setEdgeSchedule(_schedule(REF));
++        house.setKellySchedule(5000, 2500, 0, 5000);
++        vm.stopPrank();
++        t0 = _direct("T0", 0);
++        t10 = _direct("T10", 94_000);
++    }
++
++    function _schedule(uint256 ref) internal pure returns (FlipperHouseBase.EdgeSchedule memory s) {
++        s = FlipperHouseBase.EdgeSchedule(uint128(ref), 20_000, 60_000, 4500, 4750, 20_500, 20_000);
++    }
++
++    /// @dev a token whose only route is one deep pool straight to $FLIPPER with `fee` (1 token = 1 $FLIPPER)
++    function _direct(string memory sym, uint24 fee) internal returns (MockERC20 t) {
++        t = new MockERC20(sym, sym, 18);
++        (address a, address b) = address(t) < address(flipperToken)
++            ? (address(t), address(flipperToken))
++            : (address(flipperToken), address(t));
++        PoolKey memory key = PoolKey(Currency.wrap(a), Currency.wrap(b), fee, TS, IHooks(address(0)));
++        manager.initialize(key, uint160(1 << 96));
++        t.mint(address(this), 1e40);
++        flipperToken.mint(address(this), 1e40);
++        t.approve(address(lp), type(uint256).max);
++        flipperToken.approve(address(lp), type(uint256).max);
++        lp.modifyLiquidity(
++            key,
++            IPoolManager.ModifyLiquidityParams(TickMath.minUsableTick(TS), TickMath.maxUsableTick(TS), int256(uint256(1e33)), 0),
++            ""
++        );
++        vm.prank(owner);
++        house.setTokenRoute(address(t), _single(key));
++        t.mint(alice, 1e30);
++        vm.prank(alice);
++        t.approve(address(house), type(uint256).max);
++    }
++
++    function _setTreasury(uint256 t) internal {
++        store.target(address(house)).sig("treasury()").checked_write(t);
++    }
++
++    /// @dev a real inflow (income): the treasury grows and its $FLIPPER is there
++    function _donate(uint256 amount) internal {
++        flipperToken.mint(address(this), amount);
++        house.depositTreasury(amount);
++    }
++
++    function _terms() internal view returns (uint256 w, uint256 p) {
++        return (house.currentBaseWinChanceBps(), house.currentFlipperPayoutBps());
++    }
++
++    // ── edge schedule ────────────────────────────────────────────────────────────────────────────────────
++
++    function test_edge_endpoints_and_midpoint() public {
++        uint256[6] memory at = [REF, 2 * REF, 3 * REF, 4 * REF, 6 * REF, 9 * REF];
++        uint256[6] memory win = [uint256(4500), 4500, 4562, 4625, 4750, 4750];
++        uint256[6] memory pay = [uint256(20_500), 20_500, 20_375, 20_250, 20_000, 20_000];
++        for (uint256 i; i < 6; ++i) {
++            _setTreasury(at[i]);
++            (uint256 w, uint256 p) = _terms();
++            assertEq(w, win[i], "win chance");
++            assertEq(p, pay[i], "payout");
++            FlipperHouseBase.Preview memory pv = house.previewFlip(address(flipperToken), 1 ether);
++            assertEq(pv.winChanceBps, w, "the preview's odds");
++            assertEq(pv.liability, Math.mulDiv(1 ether, p - BPS, BPS, Math.Rounding.Ceil), "liability at the payout");
++            // the $FLIPPER edge: 7.75% → 5%, never below the floor
++            assertGe(BPS - Math.mulDiv(w, p, BPS, Math.Rounding.Ceil), 200);
++        }
++    }
++
++    function test_edge_moves_back_as_the_treasury_shrinks() public {
++        _setTreasury(6 * REF);
++        (uint256 w, uint256 p) = _terms();
++        assertEq(w, 4750);
++        assertEq(p, 20_000);
++        _setTreasury(3 * REF); // a quarter of the way along again
++        (w, p) = _terms();
++        assertEq(w, 4562);
++        assertEq(p, 20_375);
++        _setTreasury(REF);
++        (w, p) = _terms();
++        assertEq(w, 4500, "back to the start: protective in a drawdown");
++        assertEq(p, 20_500);
++    }
++
++    function test_flips_keep_their_flip_time_terms() public {
++        uint256 amt = 1 * M;
++        uint256 id = _flip(alice, address(flipperToken), amt); // at 45% × 2.05×
++        _donate(500 * M); // the treasury reaches 6×: 47.5% × 2.0× for new flips
++        (uint256 w, uint256 p) = _terms();
++        assertEq(w, 4750);
++        assertEq(p, 20_000);
++        uint256 b0 = flipperToken.balanceOf(alice);
++        _reveal(id, WIN_WORD);
++        assertEq(flipperToken.balanceOf(alice) - b0, amt * 20_500 / BPS, "paid at its own 2.05x");
++        uint256 id2 = _flip(alice, address(flipperToken), amt);
++        (,, uint16 w2,,,,,,,,, uint16 p2) = house.flips(id2);
++        assertEq(w2, 4750);
++        assertEq(p2, 20_000);
++        _assertSolvent();
++    }
++
++    function test_min_edge_and_route_cost_at_the_end_schedule() public {
++        _donate(500 * M); // 6×: base 47.5%
++        FlipperHouseBase.Preview memory free = house.previewFlip(address(t0), 10_000 ether);
++        assertEq(free.winChanceBps, 4750, "a free route gets the full base odds");
++        FlipperHouseBase.Preview memory costly = house.previewFlip(address(t10), 10_000 ether);
++        assertEq(costly.code, 0);
++        assertGt(costly.routeCostBps, 900);
++        // the chance-based fee holds the floor: edge = 1 − h − 2p ≥ 2%
++        assertGe(BPS - costly.routeCostBps - 2 * costly.winChanceBps, 200);
++        assertLt(costly.winChanceBps, 4750);
++    }
++
++    function test_partner_discount_on_top_of_the_schedule() public {
++        _donate(500 * M);
++        uint256 id = _flipWith(alice, address(flipperToken), 1 * M, _suffix("demo"));
++        assertGt(_winChance(id), 4750, "the discount adds to the scheduled odds");
++        (, uint256 kept) = _edges(id);
++        assertGe(kept + 1, 200, "the house keeps its floor after the partner");
++    }
++
++    function test_preview_equals_acceptance_at_the_boundary() public {
++        _setTreasury(4 * REF); // the midpoint
++        flipperToken.mint(address(house), 3 * REF); // back the written treasury with real $FLIPPER
++        uint256 lo = 1;
++        uint256 hi = 1e30;
++        while (hi - lo > 1) {
++            uint256 mid = (lo + hi) / 2;
++            if (house.previewFlip(address(flipperToken), mid).code == 0) lo = mid;
++            else hi = mid;
++        }
++        FlipperHouseBase.Preview memory above = house.previewFlip(address(flipperToken), lo + 1);
++        assertEq(above.code, 7);
++        uint256 fee = house.randomnessFeeFor(address(flipperToken));
++        flipperToken.mint(alice, lo + 1);
++        vm.prank(alice);
++        vm.expectRevert(abi.encodeWithSelector(FlipperHouseBase.FlipRejected.selector, uint8(7)));
++        house.flip{value: fee}(address(flipperToken), lo + 1, 0, block.timestamp);
++        uint256 id = _flip(alice, address(flipperToken), lo);
++        (,, uint16 w,,,,,,,,, uint16 p) = house.flips(id);
++        assertEq(w, 4625);
++        assertEq(p, 20_250);
++    }
++
++    function test_schedule_bounds() public {
++        FlipperHouseBase.EdgeSchedule memory s = _schedule(REF);
++        vm.startPrank(owner);
++        s.toBps = s.fromBps;
++        vm.expectRevert(FlipperHouseBase.InvalidParams.selector);
++        house.setEdgeSchedule(s);
++        s = _schedule(REF);
++        s.winEndBps = 3999; // under minWinChanceBps
++        vm.expectRevert(FlipperHouseBase.InvalidParams.selector);
++        house.setEdgeSchedule(s);
++        s = _schedule(REF);
++        s.payoutEndBps = 19_999; // under 2x
++        vm.expectRevert(FlipperHouseBase.InvalidParams.selector);
++        house.setEdgeSchedule(s);
++        s = _schedule(REF);
++        s.winEndBps = 4900; // 49% × 2.0 = 2% edge: ok; × 2.01 would be 1.51%
++        s.payoutEndBps = 20_100;
++        vm.expectRevert(FlipperHouseBase.InvalidParams.selector);
++        house.setEdgeSchedule(s);
++        // Params can't later break the schedule
++        FlipperHouseBase.Params memory p = house.params();
++        p.minWinChanceBps = 4501;
++        p.baseWinChanceBps = 4600;
++        vm.expectRevert(FlipperHouseBase.InvalidParams.selector);
++        house.setParams(p);
++        // off: Params' odds
++        s.refTreasury = 0;
++        house.setEdgeSchedule(s);
++        vm.stopPrank();
++        (uint256 w, uint256 pay) = _terms();
++        assertEq(w, house.params().baseWinChanceBps);
++        assertEq(pay, house.params().flipperPayoutBps);
++    }
++
++    // ── drawdown-scaled Kelly ────────────────────────────────────────────────────────────────────────────
++
++    function test_kelly_backs_off_to_quarter_at_the_breaker() public {
++        uint256[6] memory ddBps = [uint256(0), 1000, 2500, 4000, 4900, 5000];
++        uint256[6] memory k = [uint256(5000), 4500, 3750, 3000, 2550, 2500];
++        uint256 prevFrac = type(uint256).max;
++        for (uint256 i; i < 6; ++i) {
++            _setTreasury(REF * (BPS - ddBps[i]) / BPS);
++            assertEq(house.currentKellyBps(), k[i], "kelly");
++            FlipperHouseBase.Preview memory pv = house.previewFlip(address(flipperToken), 1 ether);
++            uint256 frac = pv.maxLiability * 1e18 / (house.treasury() - house.reserved());
++            assertLt(frac, prevFrac, "the cap shrinks with the drawdown");
++            prevFrac = frac;
++        }
++        house.checkDrawdown();
++        assertFalse(house.locked(), "exactly half: still open");
++    }
++
++    function test_kelly_is_max_before_the_check_is_live() public {
++        vm.prank(owner);
++        house.setLockMinTreasury(uint128(200 * M)); // the drawdown check isn't live below this
++        _setTreasury(60 * M); // a 40% drawdown, but under the dust guard
++        assertEq(house.currentKellyBps(), 5000);
++    }
++
++    function test_kelly_schedule_bounds() public {
++        vm.startPrank(owner);
++        vm.expectRevert(FlipperHouseBase.InvalidParams.selector);
++        house.setKellySchedule(5000, 0, 0, 5000); // min 0
++        vm.expectRevert(FlipperHouseBase.InvalidParams.selector);
++        house.setKellySchedule(5000, 5001, 0, 5000); // min > max
++        vm.expectRevert(FlipperHouseBase.InvalidParams.selector);
++        house.setKellySchedule(10_001, 2500, 0, 5000);
++        vm.expectRevert(FlipperHouseBase.InvalidParams.selector);
++        house.setKellySchedule(5000, 2500, 5000, 5000); // start ≥ end
++        vm.expectRevert(FlipperHouseBase.InvalidParams.selector);
++        house.setKellySchedule(5000, 2500, 0, 5001); // past the breaker
++        house.setKellySchedule(8000, 2000, 1000, 4000);
++        vm.stopPrank();
++        assertEq(house.params().kellyBps, 8000);
++        assertEq(house.kellyMinBps(), 2000);
++    }
++
++    /// @dev exact Kelly f* (WAD) of a $FLIPPER flip at win chance `w` and payout `pay`, half the edge to holders
++    function _fStar(uint256 w, uint256 pay) internal pure returns (uint256) {
++        uint256 e = BPS - Math.mulDiv(w, pay, BPS, Math.Rounding.Ceil);
++        uint256 q = BPS - w;
++        uint256 g = WAD - Math.mulDiv(WAD, e * 5000, BPS * q);
++        uint256 loss = w * Math.mulDiv((pay - BPS) * WAD / BPS, WAD, g);
++        return q * WAD > loss ? (q * WAD - loss) / BPS : 0;
++    }
++
++    /// the cap never exceeds max Kelly × f* of the unreserved bankroll, at any drawdown and any point of the schedule
++    function testFuzz_cap_never_above_max_kelly(uint256 dd, uint256 growth) public {
++        dd = bound(dd, 0, 4999);
++        growth = bound(growth, 0, 80_000); // up to 9× the reference
++        uint256 t = REF * (BPS + growth) / BPS;
++        _setTreasury(t);
++        house.checkDrawdown(); // raise the ATH to it
++        _setTreasury(t * (BPS - dd) / BPS);
++        (uint256 w, uint256 pay) = _terms();
++        FlipperHouseBase.Preview memory pv = house.previewFlip(address(flipperToken), 1 ether);
++        uint256 unres = house.treasury() - house.reserved();
++        uint256 ref = Math.mulDiv(unres, _fStar(w, pay) * 5000, WAD * BPS);
++        assertLe(pv.maxLiability, ref + ref / 1e12 + 1, "never above max Kelly x f*");
++        assertLe(house.currentKellyBps(), 5000);
++        assertGe(house.currentKellyBps(), 2500);
++    }
++
++    // ── no same-transaction gain from inflows ────────────────────────────────────────────────────────────
++
++    /// A huge vault deposit moves the schedule to its end (5% edge) and raises the cap, but every flip is still
++    /// negative for the player, and the deposit can't leave for 30 days.
++    function test_a_large_deposit_cant_be_flipped_against_profitably() public {
++        vault.crystallize();
++        flipperToken.mint(mallory, 2_000 * M);
++        vm.startPrank(mallory);
++        flipperToken.approve(address(vault), type(uint256).max);
++        uint256 shares = vault.deposit(1_000 * M, 0); // 11x the reference
++        vm.stopPrank();
++        (uint256 w, uint256 pay) = _terms();
++        assertEq(w, 4750);
++        assertEq(pay, 20_000);
++        assertLt(w * pay, BPS * BPS, "a $FLIPPER flip still loses 5% on average");
++        FlipperHouseBase.Preview memory pv = house.previewFlip(address(t0), 10_000 ether);
++        assertLe(2 * pv.winChanceBps + pv.routeCostBps + 200, BPS, "a token flip still keeps >= 2%");
++        vm.prank(mallory);
++        vm.expectRevert(abi.encodeWithSelector(TreasuryVault.Locked.selector, vault.unlockAt(mallory)));
++        vault.requestWithdraw(shares);
++        assertGe(vault.unlockAt(mallory), vm.getBlockTimestamp() + 30 days - 1);
++    }
++
++    /// A donation (unrecoverable) that moves the schedule buys less expected value than it costs.
++    function test_a_donation_costs_more_than_the_odds_it_buys() public {
++        uint256 d = 500 * M;
++        _donate(d);
++        FlipperHouseBase.Preview memory pv = house.previewFlip(address(flipperToken), 1 ether);
++        uint256 maxStake = pv.maxLiability * BPS / (house.currentFlipperPayoutBps() - BPS);
++        // the edge fell by 7.75% − 5% = 2.75% of the stake per flip: far less than the donation even at the max stake
++        assertLt(maxStake * 275 / BPS, d / 10);
++    }
++}

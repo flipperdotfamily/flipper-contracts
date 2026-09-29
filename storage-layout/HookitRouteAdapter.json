@@ -1,0 +1,76 @@
+{
+ "storage": [
+  [
+   "_rails",
+   "0",
+   0,
+   "t_array(t_struct(Rail)_storage)dyn_storage"
+  ],
+  [
+   "listingPolicy",
+   "1",
+   0,
+   "t_contract(ListingPolicy)"
+  ],
+  [
+   "house",
+   "2",
+   0,
+   "t_address"
+  ],
+  [
+   "_flipperPool",
+   "3",
+   0,
+   "t_struct(PoolKey)_storage"
+  ]
+ ],
+ "structs": {
+  "t_struct(PoolKey)_storage": [
+   [
+    "currency0",
+    "0",
+    0,
+    "t_userDefinedValueType(Currency)"
+   ],
+   [
+    "currency1",
+    "1",
+    0,
+    "t_userDefinedValueType(Currency)"
+   ],
+   [
+    "fee",
+    "1",
+    20,
+    "t_uint24"
+   ],
+   [
+    "tickSpacing",
+    "1",
+    23,
+    "t_int24"
+   ],
+   [
+    "hooks",
+    "2",
+    0,
+    "t_contract(IHooks)"
+   ]
+  ],
+  "t_struct(Rail)_storage": [
+   [
+    "factory",
+    "0",
+    0,
+    "t_contract(IHookitLaunchFactory)"
+   ],
+   [
+    "hook",
+    "1",
+    0,
+    "t_contract(IHookitMasterHook)"
+   ]
+  ]
+ }
+}

@@ -1,0 +1,14 @@
+DiceEntropy.sol in this directory is third-party code, vendored unmodified (flattened) as a local test/dev double.
+
+Dice Protocol — DiceEntropy v10
+  Copyright 2026 Dice Protocol. Licensed under the Apache License, Version 2.0.
+  Source: verified contract 0xd8A0680e7699526B57140ED4EAfdCc7219Dc0A0c on Robinhood Chain (4663),
+          https://robinhoodchain.blockscout.com/address/0xd8a0680e7699526b57140ed4eafdcc7219dc0a0c
+          https://github.com/diceprotocol/dice-protocol-docs
+  Derived from Pyth Entropy (https://github.com/pyth-network/pyth-crosschain), Copyright 2024 Pyth Network,
+  Apache License, Version 2.0.
+
+ExcessivelySafeCall — Copyright nomad-xyz, dual-licensed MIT OR Apache-2.0
+  (https://github.com/nomad-xyz/ExcessivelySafeCall).
+
+Apache License 2.0: https://www.apache.org/licenses/LICENSE-2.0

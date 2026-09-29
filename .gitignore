@@ -1,0 +1,32 @@
+# Foundry build output and caches
+out/
+cache/
+report/
+lcov.info
+*.lcov
+
+# Broadcast records: keep the mainnet deployment's (DeployMainnet on Robinhood Chain), drop local and rehearsal runs
+broadcast/*
+!broadcast/DeployMainnet.s.sol/
+broadcast/DeployMainnet.s.sol/*
+!broadcast/DeployMainnet.s.sol/4663/
+
+# Deployments: keep the mainnet's manifest, state, progress and key addresses (script/mainnet.sh); drop local
+# (dev.sh) and rehearsal runs, and the forge logs
+deployments/*
+!deployments/robinhood.json
+!deployments/robinhood.state.json
+!deployments/robinhood.progress
+!deployments/robinhood.keys.json
+
+# Env files hold keys and API secrets: never commit them (the examples are kept)
+.env
+.env.*
+!.env.*.example
+!.env.example
+
+# OS / editors / logs
+.DS_Store
+.idea/
+.vscode/
+*.log
