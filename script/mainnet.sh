@@ -49,6 +49,7 @@
 #   RPC_URL             default https://rpc.mainnet.chain.robinhood.com
 #   WEB_URL             e.g. https://flipper.family: `live` also checks the site serves the deployment
 #   SITE_SETTINGS_JSON  public site settings to publish (a JSON object; optional)
+#   BROWSER_RPC_URL     the RPC the site's browsers use (settings.browserRpcUrl; default: Robinhood Chain's public RPC)
 #   ETHERSCAN_API_KEY   for verify (Etherscan V2)
 #   SIGNER              ledger (default) | unlocked (rehearsal on an anvil fork: REHEARSAL=1)
 #   plus DeployMainnet's own: V4_START_MCAP_USD OPENING_BUY_SUPPLY_BPS MAX_OPENING_BUY_ETH UNCX_LOCK OPERATOR_FUND_WEI
@@ -64,7 +65,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --yes) YES=1 ;;
     --env) ENV_FILE="$2"; shift ;;
-    -h|--help) sed -n '2,55p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,56p' "$0"; exit 0 ;;
     *) ARGS+=("$1") ;;
   esac
   shift
@@ -272,12 +273,21 @@ run_step() {
         echo "   the API replaces its previous deployment and restarts: waiting for it"
         for _ in $(seq 1 60); do sleep 2; admin GET /v1/admin/status >/dev/null 2>&1 && break; done
       fi
-      if [[ -n "${SITE_SETTINGS_JSON:-}" ]]; then
-        python3 -c "import json,sys; d=json.loads(sys.argv[1]); assert isinstance(d, dict)" "$SITE_SETTINGS_JSON" 2>/dev/null || {
-          red "SITE_SETTINGS_JSON isn't a JSON object: $SITE_SETTINGS_JSON (in the env file, wrap it in single quotes)"; return 1; }
-        r=$(admin PUT /v1/admin/settings "$SITE_SETTINGS_JSON") || return 1
-        echo "   settings: $r"
-      fi
+      # the site settings always carry the browser's RPC (browserRpcUrl): BROWSER_RPC_URL, else on Robinhood Chain the
+      # public RPC (never RPC_URL there: a paid, keyed endpoint mustn't reach every browser), else (a rehearsal) RPC_URL
+      local chain browser settings; chain=$(cast chain-id --rpc-url "$RPC_URL")
+      if [[ -n "${BROWSER_RPC_URL:-}" ]]; then browser="$BROWSER_RPC_URL"
+      elif [[ "$chain" == 4663 ]]; then browser=https://rpc.mainnet.chain.robinhood.com
+      else browser="$RPC_URL"; fi
+      settings=$(python3 -c "
+import json, sys
+d = json.loads(sys.argv[1] or '{}')
+assert isinstance(d, dict)
+d.setdefault('browserRpcUrl', sys.argv[2])
+print(json.dumps(d))" "${SITE_SETTINGS_JSON:-}" "$browser" 2>/dev/null) || {
+        red "SITE_SETTINGS_JSON isn't a JSON object: ${SITE_SETTINGS_JSON:-} (in the env file, wrap it in single quotes)"; return 1; }
+      r=$(admin PUT /v1/admin/settings "$settings") || return 1
+      echo "   settings: $r"
       mark_done publish ;;
     acceptUnlocker)
       load_keys || return 1
