@@ -325,8 +325,12 @@ abstract contract SimDriver is SimBase {
         if (house.locked()) return g;
         uint256 snap = vm.snapshotState();
         address p = players[1];
-        (g[0], g[1]) = _gasFlip(p, address(token), _flipperCap(p, "") / 2);
+        // a sample the house would refuse (e.g. half the cap under its minimum liability, late in a long run) is skipped:
+        // a 0 sample isn't compared
+        uint256 amtF = _flipperCap(p, "") / 2;
+        (g[0], g[1]) = _gasFlip(p, address(token), amtF < _minFlipperStake() ? 0 : amtF);
         uint256 capW = _tokenCap(address(weth), 1000 ether) / 2;
+        if (capW != 0 && _preview(p, address(weth), capW, "").code != 0) capW = 0;
         if (capW != 0) {
             vm.prank(p);
             weth.deposit{value: capW}();

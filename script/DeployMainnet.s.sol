@@ -73,7 +73,7 @@ interface IOwnableM {
 ///
 ///   Env: OWNER_ADDRESS, OPERATOR_ADDRESS, CLAIM_WALLET, UPKEEP_ADDRESS (required); STATE_FILE
 ///   (deployments/robinhood.state.json), MANIFEST_FILE (deployments/robinhood.json), V4_START_MCAP_USD (5000),
-///   OPENING_BUY_SUPPLY_BPS (1500), MAX_OPENING_BUY_ETH (0.5 ether: the launch refuses to spend more), UNCX_LOCK (0),
+///   OPENING_BUY_SUPPLY_BPS (1250), MAX_OPENING_BUY_ETH (0.5 ether: the launch refuses to spend more), UNCX_LOCK (0),
 ///   REHEARSAL (0; 1 = an anvil fork of Robinhood Chain: chain id 31337 allowed, ArbSys off).
 contract DeployMainnet is Script {
     uint256 internal constant SUPPLY = 1_000_000_000 ether;
@@ -155,7 +155,7 @@ contract DeployMainnet is Script {
     }
 
     /// @notice Top up the backend-held wallets from the owner: the operator (guardian + unlocker; the API signs its
-    ///         actions) to OPERATOR_FUND_WEI (0.005 ETH), the upkeep key to UPKEEP_FUND_WEI (0.05 ETH) and the dev
+    ///         actions) to OPERATOR_FUND_WEI (0.005 ETH), the upkeep key to UPKEEP_FUND_WEI (0.025 ETH) and the dev
     ///         claim wallet (the API's claim key: it pays for the sweeps) to CLAIM_FUND_WEI (0.01 ETH). Only what's
     ///         missing is sent.
     function fund() external {
@@ -799,7 +799,7 @@ contract DeployMainnet is Script {
         who = [c.operator, c.upkeep, c.claim];
         target = [
             vm.envOr("OPERATOR_FUND_WEI", uint256(0.005 ether)),
-            vm.envOr("UPKEEP_FUND_WEI", uint256(0.05 ether)),
+            vm.envOr("UPKEEP_FUND_WEI", uint256(0.025 ether)),
             vm.envOr("CLAIM_FUND_WEI", uint256(0.01 ether))
         ];
     }
@@ -884,7 +884,7 @@ contract DeployMainnet is Script {
         c.claim = vm.envAddress("CLAIM_WALLET");
         c.upkeep = vm.envAddress("UPKEEP_ADDRESS");
         c.startMcapUsd = vm.envOr("V4_START_MCAP_USD", uint256(5000));
-        c.buyBps = vm.envOr("OPENING_BUY_SUPPLY_BPS", uint256(1500));
+        c.buyBps = vm.envOr("OPENING_BUY_SUPPLY_BPS", uint256(1250));
         c.maxBuyEth = vm.envOr("MAX_OPENING_BUY_ETH", uint256(0.5 ether));
         c.uncx = vm.envOr("UNCX_LOCK", uint256(0)) == 1;
         c.rehearsal = vm.envOr("REHEARSAL", uint256(0)) == 1;

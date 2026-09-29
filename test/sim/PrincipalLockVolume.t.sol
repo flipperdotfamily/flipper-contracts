@@ -12,7 +12,7 @@ import {PrincipalLock} from "../../src/PrincipalLock.sol";
 import {SimDriver} from "./SimDriver.sol";
 
 /// @notice The dev-buy lockup (PrincipalLock) under real volume, deployed as Deploy.s.sol deploys it: the opening buy
-///         (15% of the supply) is the lock's principal and, with the whole supply in the pool, the entire bankroll.
+///         (12.5% of the supply) is the lock's principal and, with the whole supply in the pool, the entire bankroll.
 ///   Run: nice -n 10 forge test --match-path test/sim/PrincipalLockVolume.t.sol -vv --gas-limit 9223372036854775807
 contract PrincipalLockVolumeTest is SimDriver {
     uint256 internal constant Q = 1e27; // the vault's PPS_SCALE
@@ -49,7 +49,9 @@ contract PrincipalLockVolumeTest is SimDriver {
     // ── after each volume level ─────────────────────────────────────────────────────────────────────────
 
     /// $10k → $100k → $1M: at each level anyone's sweep pays devAddress only, others can't request, devAddress takes
-    /// the excess after the cooldown (both reward sources swept with it), and the principal never moves
+    /// the excess after the cooldown (both reward sources swept with it), and the principal never moves. A level can
+    /// land in a house drawdown (about 1 run in 4 at $10k, whatever the opening buy's size): the lock is then worth
+    /// less than its principal, and nothing may leave it
     function test_lock_at_each_volume_level() public {
         _logHeader();
         uint256[3] memory lv = [uint256(10_000e18), 100_000e18, 1_000_000e18];
@@ -60,9 +62,15 @@ contract PrincipalLockVolumeTest is SimDriver {
             assertGe(st.volUsd, lv[i], "level reached");
             uint256 devBefore = token.balanceOf(dev);
             uint256 excessBefore = lock.withdrawableExcess();
+            uint256 takenBefore = st.devExcess;
             _checkpoint(nm[i]); // sweeps (anyone) and takes the excess (devAddress), asserting as it goes
             assertEq(lock.principal(), principal0, "principal never moves");
-            assertGe(lock.value(), principal0, "still worth at least the principal");
+            if (lock.value() < principal0) {
+                // under water at this level: nothing is withdrawable, and nothing was taken
+                assertEq(lock.withdrawableExcess(), 0, "under water: nothing withdrawable");
+                assertEq(st.devExcess, takenBefore, "under water: no excess taken");
+                console2.log("level under water (a house drawdown): value / principal", nm[i], lock.value(), principal0);
+            }
             assertGe(token.balanceOf(dev), devBefore, "devAddress only ever receives");
             console2.log("level / excess before / dev received", nm[i], excessBefore, token.balanceOf(dev) - devBefore);
         }
@@ -77,8 +85,22 @@ contract PrincipalLockVolumeTest is SimDriver {
     function test_under_water_then_recovery() public {
         _driveTo(10_000e18, 40_000, 2 days);
         uint256 u = vault.unlockAt(address(lock));
-        if (vm.getBlockTimestamp() < u) _advance(u - vm.getBlockTimestamp()); // past the vault's 30-day lock
+        if (vm.getBlockTimestamp() < u) _advance(u - vm.getBlockTimestamp()); // past the vault's 7-day lock
         _checkpoint("10k"); // excess taken: the lock sits at (about) its principal at the mark
+        {
+            // unless the house is in a drawdown at this level (about 1 run in 4): then win back up to the vault's mark
+            // and take the excess there, so the test starts where it means to
+            (, uint256 pre0,) = _modelPps();
+            if (pre0 < vault.hwm()) {
+                while (pre0 < vault.hwm()) {
+                    _streak(false, 1, BPS);
+                    _crystallize();
+                    (, pre0,) = _modelPps();
+                }
+                _upkeep();
+                _takeExcess();
+            }
+        }
         _crystallize();
         uint256 hwm0 = vault.hwm();
         uint256 v0 = lock.value(); // at the mark

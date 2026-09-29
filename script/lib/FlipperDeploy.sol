@@ -60,7 +60,7 @@ interface IBindable {
 library FlipperDeploy {
     // TreasuryVault defaults (Deploy.s.sol overrides them through `setParams` before the hand-over)
     uint16 internal constant VAULT_FEE_BPS = 8000; // 80% of depositors' gains above the high-water mark → POL
-    uint32 internal constant VAULT_LOCK = 30 days;
+    uint32 internal constant VAULT_LOCK = 7 days;
     /// @dev gas for a script's vault calls: forge sizes script transactions from the simulation's gas used, which
     ///      doesn't show the vault's reward-sync gas floors (300k left at two points)
     uint256 internal constant VAULT_CALL_GAS = 1_500_000;

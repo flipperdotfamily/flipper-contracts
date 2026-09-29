@@ -113,7 +113,7 @@ contract TreasuryVaultTest is FlipperBase {
         assertEq(vault.symbol(), "sFLIPPER");
         assertEq(vault.decimals(), 18);
         assertEq(vault.performanceFeeBps(), 8000);
-        assertEq(vault.lockDuration(), 30 days);
+        assertEq(vault.lockDuration(), 7 days);
         assertEq(vault.withdrawCooldown(), 2 days);
         assertEq(vault.PPS_SCALE(), ONE);
     }
@@ -370,10 +370,10 @@ contract TreasuryVaultTest is FlipperBase {
     function test_lock_blocks_requests_and_a_new_deposit_extends_it() public {
         uint256 t0 = vm.getBlockTimestamp();
         _stake(alice, M);
-        assertEq(vault.unlockAt(alice), t0 + 30 days);
-        vm.warp(t0 + 10 days);
+        assertEq(vault.unlockAt(alice), t0 + 7 days);
+        vm.warp(t0 + 3 days);
         _stake(alice, M);
-        uint256 until = t0 + 40 days;
+        uint256 until = t0 + 10 days;
         assertEq(vault.unlockAt(alice), until, "all shares relocked");
 
         vm.warp(until - 1);
@@ -619,7 +619,7 @@ contract TreasuryVaultTest is FlipperBase {
         assertEq(v.protocolOwnedAssets, polA);
         assertEq(v.depositorAssets, dA);
         assertEq(v.performanceFeeBps, 8000);
-        assertEq(v.lockDuration, 30 days);
+        assertEq(v.lockDuration, 7 days);
         assertEq(v.withdrawCooldown, 2 days);
         (uint256 shares, uint256 assets, uint256 unlocksAt,,) = vault.positionOf(alice);
         assertEq(p.shares, shares);

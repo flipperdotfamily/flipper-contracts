@@ -10,7 +10,7 @@ import {SimDriver} from "./SimDriver.sol";
 ///   Deploy (own anvil, not the dev stack):
 ///     anvil --fork-url https://rpc.ordofi.network --fork-block-number 72650000 --chain-id 31340 --port 18989
 ///     DEPLOYER_PRIVATE_KEY=<anvil key 0> DEV=1 ENTROPY_MODE=dice-mock V4_START_MCAP_USD=5000 V4_POOL_BPS=10000 \
-///       OPENING_BUY_SUPPLY_BPS=1500 PRINCIPAL_LOCK=1 VAULT_LOCK_DAYS=30 VAULT_COOLDOWN_HOURS=48 \
+///       OPENING_BUY_SUPPLY_BPS=1250 PRINCIPAL_LOCK=1 VAULT_LOCK_DAYS=7 VAULT_COOLDOWN_HOURS=48 \
 ///       KEEPER_ADDRESS=<makeAddr("keeper")> DEV_PAYOUT_ADDRESS=<makeAddr("devPayout")> \
 ///       DEPLOYMENT_FILE=deployments/sim-fork.json forge script script/Deploy.s.sol:Deploy --rpc-url \
 ///       http://127.0.0.1:18989 --broadcast --slow

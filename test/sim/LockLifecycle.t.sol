@@ -16,12 +16,12 @@ contract LockLifecycleTest is SimDriver {
         _start(41);
     }
 
-    /// Before the vault's 30-day lock: a request reverts `Locked`. After it: request, a withdrawal before the 2-day
+    /// Before the vault's 7-day lock: a request reverts `Locked`. After it: request, a withdrawal before the 2-day
     /// cooldown reverts `CoolingDown`, after it pays. A second request restarts the cooldown for everything queued.
     function test_request_before_the_lock_then_cooldown() public {
         _driveTo(10_000e18, 40_000, 12 hours);
         uint256 until = vault.unlockAt(address(lock));
-        assertLt(vm.getBlockTimestamp(), until, "still inside the 30-day lock");
+        assertLt(vm.getBlockTimestamp(), until, "still inside the 7-day lock");
         if (lock.withdrawableExcess() == 0) _streak(false, 30, BPS); // make sure there is an excess
         uint256 x = lock.withdrawableExcess();
         assertGt(x, 0, "an excess exists");

@@ -450,7 +450,7 @@ Two properties follow from this design:
 path.
 
 **Lock and cooldown.**
-1. Each deposit locks all of the staker's shares until `max(unlockAt, now + lockDuration)` (default 30 days).
+1. Each deposit locks all of the staker's shares until `max(unlockAt, now + lockDuration)` (default 7 days).
 2. After that, `requestWithdraw(shares)` queues shares and (re)starts `withdrawCooldown` (default 2 days) for
    everything pending.
 3. `withdraw(minAssets)` then burns all pending shares at the price of that moment.
@@ -504,7 +504,7 @@ at half its Kelly fraction of the free bankroll (at most 5%, typically 0.6–2.7
 `launchFlipperV4Token` (default): the reward-bearing $FLIPPER is deployed with its fixed supply minted to the router,
 which initialises a hookless ETH/$FLIPPER pool at a **$5k starting market cap** (`V4_START_MCAP_USD`), seeds **all
 of the supply** into it as single-sided liquidity from that price to the minimum tick (held by the LiquidityKeeper,
-never removable), and makes the opening buy in the same transaction: **exactly 15% of the supply**
+never removable), and makes the opening buy in the same transaction: **exactly 12.5% of the supply**
 (`OPENING_BUY_SUPPLY_BPS`; the deploy computes the ETH from the pool maths and the router enforces the amount as the
 buy's minimum out; about $890 of ETH at the $5k start, fee included). That ETH stays in the pool as permanent
 protocol-owned depth (nobody can ever remove liquidity), and the tokens it bought become the bankroll through the
@@ -543,7 +543,7 @@ minted to and held by the `LiquidityKeeper`, which has no owner, no admin and no
 
 ### Team stake (`PrincipalLock`)
 
-**The team's opening buy, 15% of supply, is staked in the treasury through an immutable PrincipalLock. The principal
+**The team's opening buy, 12.5% of supply, is staked in the treasury through an immutable PrincipalLock. The principal
 can never be withdrawn; only what it earns on top (its share of treasury gains and staking and holder rewards) can be
 claimed, to fund development.**
 
@@ -768,7 +768,7 @@ script/storage-layout.sh --check              # upgrade safety
 ```
 
 Deployment: `script/Deploy.s.sol` (defaults: Robinhood, the reward-bearing $FLIPPER on v4 at a $5k start with all of
-the supply in the pool, a 15%-of-supply opening buy staked through the PrincipalLock, Dice; see its NatSpec for env:
+the supply in the pool, a 12.5%-of-supply opening buy staked through the PrincipalLock, Dice; see its NatSpec for env:
 `ENTROPY_MODE` (`dice` / `dice-mirror` / `dice-mock`), `OPENING_BUY_SUPPLY_BPS`, `PRINCIPAL_LOCK`,
 `DEV_PAYOUT_ADDRESS`, `REWARD_BEARING`, `VAULT_FEE_BPS`, `VAULT_LOCK_DAYS`, `VAULT_COOLDOWN_HOURS`, …), usually through
 `../dev.sh`. The manifest lists the vault as `contracts.treasuryVault`, the team stake as `contracts.principalLock` and

@@ -205,7 +205,7 @@ contract RewardSystemTest is GasSearch {
         token.approve(address(lock), 50_000_000 ether);
         lock.stake(50_000_000 ether);
         _lose(4_000_000 ether); // treasury gains: the lock's excess (the profit share is still in the house)
-        _warp(30 days); // the vault's lock period
+        _warp(30 days); // past the vault's lock period
         vm.prank(dev);
         lock.requestExcess(type(uint256).max);
         (uint256 qShares,,) = lock.pendingWithdrawal();

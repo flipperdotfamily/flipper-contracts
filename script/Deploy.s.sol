@@ -101,7 +101,7 @@ interface ISwapRouter02 {
 ///                            protocol-owned (the TreasuryVault bootstraps it as POL)
 ///     VAULT_FEE_BPS          TreasuryVault performance fee: share of stakers' gains above the high-water mark that
 ///                            becomes protocol-owned (default 8000)
-///     VAULT_LOCK_DAYS        lock after each stake (default 30; DEV=1: 1)
+///     VAULT_LOCK_DAYS        lock after each stake (default 7; DEV=1: 1)
 ///     VAULT_COOLDOWN_HOURS   withdrawal cooldown (default 48; DEV=1: 10 minutes)
 ///     SEED_ACCOUNT_KEYS      comma-separated keys that each buy SEED_BUY_ETH of $FLIPPER and of the reward token
 ///     DEV                    "1" for local development
@@ -688,7 +688,7 @@ contract Deploy is Script {
         e.entropyMode = vm.envOr("ENTROPY_MODE", string(e.robinhood ? (e.dev ? "dice-mirror" : "dice") : "chainlink"));
         e.rewardToken = vm.envOr("REWARD_TOKEN", e.robinhood ? RobinhoodAddresses.PONS : InkAddresses.HKT);
         e.openingBuyUsd = vm.envOr("OPENING_BUY_USD", uint256(1000));
-        e.openingBuySupplyBps = _envUintOr("OPENING_BUY_SUPPLY_BPS", 1500);
+        e.openingBuySupplyBps = _envUintOr("OPENING_BUY_SUPPLY_BPS", 1250);
         require(e.openingBuySupplyBps <= 10_000, "OPENING_BUY_SUPPLY_BPS");
         e.principalLock = _envUintOr("PRINCIPAL_LOCK", 1) == 1;
         e.devPayout = _isSet("DEV_PAYOUT_ADDRESS") ? vm.envAddress("DEV_PAYOUT_ADDRESS") : e.deployer;

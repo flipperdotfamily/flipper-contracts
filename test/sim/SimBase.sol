@@ -42,8 +42,8 @@ interface IChainlinkFeed {
 }
 
 /// @notice Long-horizon simulation harness for flipper.family, deployed exactly as Deploy.s.sol deploys it (see
-///         SimDeployer) with the launch config: V4_START_MCAP_USD=5000, V4_POOL_BPS=10000, OPENING_BUY_SUPPLY_BPS=1500,
-///         PRINCIPAL_LOCK=1, dice-mock randomness, production vault parameters (80% fee, 30-day lock, 2-day cooldown).
+///         SimDeployer) with the launch config: V4_START_MCAP_USD=5000, V4_POOL_BPS=10000, OPENING_BUY_SUPPLY_BPS=1250,
+///         PRINCIPAL_LOCK=1, dice-mock randomness, production vault parameters (80% fee, 7-day lock, 2-day cooldown).
 ///
 ///   Local analogues of the Robinhood routes: WETH (a WETH9) through the real WethWrapperHook pool, and a 6-dp USD
 ///   token (USDG) with a deep hookless ETH pool (fee 460, tick spacing 9, as USDG's). Both route through the
@@ -76,7 +76,7 @@ abstract contract SimBase is Test {
     uint256 internal untrackedBase; // fork: $FLIPPER held by accounts that don't act in the simulation
     uint256 internal constant START_MCAP_USD = 5000;
     uint256 internal constant POOL_BPS = 10_000;
-    uint256 internal constant OPENING_BUY_SUPPLY_BPS = 1500;
+    uint256 internal constant OPENING_BUY_SUPPLY_BPS = 1250;
     uint256 internal constant BPS = 10_000;
     uint256 internal constant MAG = 2 ** 96;
     uint256 internal constant CHAIN_LEN = 1024;
@@ -268,7 +268,7 @@ abstract contract SimBase is Test {
             devPayout: dev,
             treasurySeedBps: 9000,
             vaultFeeBps: 8000,
-            vaultLock: 30 days,
+            vaultLock: 7 days,
             vaultCooldown: 2 days,
             keeper: keeper,
             dev: true,
