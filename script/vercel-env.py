@@ -1,54 +1,33 @@
 #!/usr/bin/env python3
-"""Print the web app's Vercel environment from a deployment manifest (KEY=value lines, ready to paste into Vercel's
-"Import .env").
+"""Print the web app's Vercel environment (KEY=value lines, ready to paste into Vercel's "Import .env").
 
-    contracts/script/vercel-env.py contracts/deployments/robinhood.json \
-        --api https://api.flipper.family --site https://flipper.family [--rpc <url>] [--walletconnect <project id>]
+The web reads the chain, the contracts' addresses and the site settings from the API at runtime (`GET /v1/site`),
+so its env is static: set it once, before the contracts exist.
+
+    contracts/script/vercel-env.py --api https://api.flipper.family [--site https://flipper.family] \
+        [--walletconnect <reown project id>] [--walletconnect-verification <code>] [--sentry-dsn <dsn>]
 """
 import argparse
-import json
 
 ap = argparse.ArgumentParser()
-ap.add_argument("manifest")
 ap.add_argument("--api", required=True, help="the Go API's public URL (Railway)")
 ap.add_argument("--site", default="https://flipper.family")
-ap.add_argument("--rpc", default="https://rpc.mainnet.chain.robinhood.com", help="browser RPC (public; a keyed one must be domain-locked)")
 ap.add_argument("--walletconnect", default="", help="Reown project id")
+ap.add_argument("--walletconnect-verification", default="", help="Reown's domain verification code")
+ap.add_argument("--sentry-dsn", default="", help="optional: Sentry is on only when set")
 a = ap.parse_args()
 
-m = json.load(open(a.manifest))
-c = m["contracts"]
-if m.get("chainId") != 4663:
-    print("# WARNING: this manifest is for chain %s, not Robinhood Chain (4663)" % m.get("chainId"))
-
 env = [
-    ("NEXT_PUBLIC_CHAIN_ID", m["chainId"]),
-    ("NEXT_PUBLIC_RPC_URL", a.rpc),
-    ("NEXT_PUBLIC_API_URL", a.api),
-    ("NEXT_PUBLIC_SITE_URL", a.site),
+    ("NEXT_PUBLIC_API_URL", a.api.rstrip("/")),
+    ("NEXT_PUBLIC_SITE_URL", a.site.rstrip("/")),
     ("NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID", a.walletconnect),
-    ("NEXT_PUBLIC_DEPLOY_BLOCK", m["deployBlock"]),
-    ("NEXT_PUBLIC_POOL_MANAGER_START_BLOCK", m["poolManagerStartBlock"]),
-    ("NEXT_PUBLIC_HOUSE", c["house"]),
-    ("NEXT_PUBLIC_LENS", c["lens"]),
-    ("NEXT_PUBLIC_FLIPPER", c["flipper"]),
-    ("NEXT_PUBLIC_REWARDS", c["holderRewards"]),
-    ("NEXT_PUBLIC_V4_ADAPTER", c["v4Adapter"]),
-    ("NEXT_PUBLIC_V3_ADAPTER", c["v3Adapter"]),
-    ("NEXT_PUBLIC_V3_BRIDGE", c["v3Bridge"]),
-    ("NEXT_PUBLIC_TREASURY_VAULT", c["treasuryVault"]),
-    ("NEXT_PUBLIC_PRINCIPAL_LOCK", c["principalLock"]),
-    ("NEXT_PUBLIC_REVENUE_ROUTER", c["router"]),
-    ("NEXT_PUBLIC_RANDOMNESS_ADAPTER", c["randomness"]),
-    ("NEXT_PUBLIC_WETH", c["weth"]),
-    ("NEXT_PUBLIC_POOL_MANAGER", c["poolManager"]),
-    ("NEXT_PUBLIC_ETH_USD_FEED", c["ethUsdFeed"]),
-    ("NEXT_PUBLIC_MULTICALL3", c["multicall3"]),
     # server-only
-    ("WALLETCONNECT_DOMAIN_VERIFICATION", ""),
+    ("WALLETCONNECT_DOMAIN_VERIFICATION", a.walletconnect_verification),
     ("ENABLE_EXPERIMENTAL_COREPACK", 1),
 ]
+if a.sentry_dsn:
+    env.append(("NEXT_PUBLIC_SENTRY_DSN", a.sentry_dsn))
 print("# flipper.family web (Vercel). NEXT_PUBLIC_* are baked in at build time: redeploy after changing them.")
-print("# Never set NEXT_PUBLIC_DEV_MODE, KEEPER_API_URL or any DEV_* variable in production.")
+print("# The contracts come from the API at runtime. Never set NEXT_PUBLIC_DEV_MODE, KEEPER_API_URL or any DEV_*.")
 for k, v in env:
     print("%s=%s" % (k, v))

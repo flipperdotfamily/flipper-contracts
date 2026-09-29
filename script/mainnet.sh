@@ -25,16 +25,17 @@
 #   pin            the deployment written into the SDK: its default addresses (FLIPPER_ADDRESSES, sdk/src/addresses.ts)
 #                  and the canonical house + lens (CANONICAL_DEPLOYMENTS, sdk/src/deployments.ts)
 #   release        the npm packages (@flipperdotfamily/*: sdk, widget, react, vue, svelte, angular, react-native):
-#                  the pending changesets applied, built and checked, committed in the SDK repo, published by hand (npm
-#                  asks for your 2FA code; be logged in with `npm login` as an owner of the flipperdotfamily org),
-#                  then tagged and pushed. Later releases go through the SDK repo's GitHub Actions (trusted publishing).
+#                  the pending changesets applied, built and checked, committed in the SDK repo, published from here
+#                  with NPM_ACCESS_TOKEN (else your `npm login` session, and npm asks for your 2FA code), then tagged
+#                  and pushed. Later releases go through the SDK repo's GitHub Actions (trusted publishing).
 #   record         the deployment records committed and pushed: the contracts repo (deployments/robinhood.*, the
 #                  broadcast records), then the main repo's submodule pointers (contracts/, packages/)
 #
 # Repos: this directory is flipperdotfamily/flipper-contracts, checked out as contracts/ in the main repo
 # (flipperdotfamily/flipper), beside the SDK repo (flipperdotfamily/flipper-sdk) at packages/. Run the script from
-# that checkout. Pushes use GITHUB_SECRET_KEY (a GitHub token for the flipperdotfamily account; env, or the main
-# repo's .env.deploy) when it's set, else your own git credentials.
+# that checkout. Pushes use GITHUB_SECRET_KEY (a GitHub token for the flipperdotfamily account) and npm publishes
+# NPM_ACCESS_TOKEN (an npm granular token of the flipperdotfamily user), each from the env or the main repo's
+# .env.deploy, else your own git credentials / npm login. Neither is printed or written to disk.
 #
 # For each broadcasting step: simulate against the chain (nothing sent) → confirm → broadcast with `--slow` (one
 # transaction at a time, each approved on the Ledger) → simulate again (a finished step has nothing left to send).
@@ -63,7 +64,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --yes) YES=1 ;;
     --env) ENV_FILE="$2"; shift ;;
-    -h|--help) sed -n '2,54p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,55p' "$0"; exit 0 ;;
     *) ARGS+=("$1") ;;
   esac
   shift
@@ -127,10 +128,26 @@ load_keys() {
   export OPERATOR_ADDRESS UPKEEP_ADDRESS CLAIM_WALLET
 }
 
-# github_token: GITHUB_SECRET_KEY from the env or the main repo's .env.deploy (never printed)
-github_token() {
-  if [[ -n "${GITHUB_SECRET_KEY:-}" ]]; then printf '%s' "$GITHUB_SECRET_KEY"; return; fi
-  [[ -f "$ROOT/.env.deploy" ]] && sed -n 's/^GITHUB_SECRET_KEY=//p' "$ROOT/.env.deploy" | tail -1 | tr -d "\"' \r"
+# deploy_secret <NAME>: a secret from the env, else the main repo's .env.deploy (never printed)
+deploy_secret() {
+  if [[ -n "${!1:-}" ]]; then printf '%s' "${!1}"; return; fi
+  [[ -f "$ROOT/.env.deploy" ]] && sed -n "s/^$1=//p" "$ROOT/.env.deploy" | tail -1 | tr -d "\"' \r"
+}
+github_token() { deploy_secret GITHUB_SECRET_KEY; }
+
+# npm_auth: with NPM_ACCESS_TOKEN, point npm at a throwaway config that reads the token from the environment (the
+# file holds `${NPM_ACCESS_TOKEN}`, not the token); without it, npm uses your own login
+NPM_RC=""
+npm_auth() {
+  local tok; tok=$(deploy_secret NPM_ACCESS_TOKEN)
+  [[ -n "$tok" ]] || return 0
+  export NPM_ACCESS_TOKEN="$tok"
+  if [[ -z "$NPM_RC" ]]; then
+    NPM_RC=$(mktemp "${TMPDIR:-/tmp}/flipper-npmrc.XXXXXX")
+    trap 'rm -f "$NPM_RC"' EXIT
+    printf '//registry.npmjs.org/:_authToken=${NPM_ACCESS_TOKEN}\n' > "$NPM_RC"
+  fi
+  export NPM_CONFIG_USERCONFIG="$NPM_RC"
 }
 
 # gh_push <repo dir> <push args…>: git push with the token as a one-off auth header, passed through the environment
@@ -323,7 +340,10 @@ run_step() {
         local house; house=$(jget contracts.house < "$MANIFEST_FILE")
         grep -qi "$house" "$SDK_DIR/sdk/src/deployments.ts" && grep -qi "$house" "$SDK_DIR/sdk/src/addresses.ts" || {
           red "the SDK isn't pinned to house $house: run the pin step"; return 1; }
-        npm whoami >/dev/null 2>&1 || { red "not logged in to npm: run 'npm login' (an owner of the flipperdotfamily org, 2FA on)"; return 1; }
+        npm_auth
+        local npm_user; npm_user=$(npm whoami 2>/dev/null) || {
+          red "npm doesn't authenticate: set NPM_ACCESS_TOKEN in .env.deploy (the flipperdotfamily user's granular token, read and write), or 'npm login'"; return 1; }
+        echo "   npm: publishing as $npm_user$([[ -n "$NPM_RC" ]] && echo " (NPM_ACCESS_TOKEN)")"
       fi
       echo "   building and checking the packages"
       (cd "$ROOT" && pnpm install --frozen-lockfile >/dev/null 2>&1 || pnpm install >/dev/null) || { red "pnpm install failed"; return 1; }
@@ -345,7 +365,7 @@ run_step() {
         git -C "$SDK_DIR" commit -q -m "Release $version: the Robinhood Chain deployment (house $house)" || { red "commit failed in $SDK_DIR"; return 1; }
         echo "   committed the release in the SDK repo ($(git -C "$SDK_DIR" rev-parse --short HEAD))"
       fi
-      confirm "Publish the @flipperdotfamily packages ($version) to npm now (npm asks for your 2FA code on each)?" || return 1
+      confirm "Publish the @flipperdotfamily packages ($version) to npm now$([[ -z "$NPM_RC" ]] && echo " (npm asks for your 2FA code on each)")?" || return 1
       (cd "$SDK_DIR" && node .github/scripts/publish-packages.mjs --local) || {
         red "publish incomplete: run 'script/mainnet.sh release' again (published versions are skipped)"; return 1; }
       (cd "$SDK_DIR" && "$bin/changeset" tag >/dev/null) || { red "tagging failed"; return 1; }
