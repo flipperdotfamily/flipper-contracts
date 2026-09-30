@@ -331,8 +331,6 @@ contract DeployMainnet is Script {
         }
         PartnerRegistry partners = PartnerRegistry(st.partners);
         if (partners.tierCutBps(1) != FlipperDeploy.PARTNER_TIER1_CUT_BPS) partners.setTierCut(1, FlipperDeploy.PARTNER_TIER1_CUT_BPS);
-        if (partners.tierCutBps(2) != FlipperDeploy.PARTNER_TIER2_CUT_BPS) partners.setTierCut(2, FlipperDeploy.PARTNER_TIER2_CUT_BPS);
-        if (partners.tierCutBps(3) != FlipperDeploy.PARTNER_TIER3_CUT_BPS) partners.setTierCut(3, FlipperDeploy.PARTNER_TIER3_CUT_BPS);
         if (house.partnerRegistry() != st.partners) house.setPartnerRegistry(st.partners);
         vm.stopBroadcast();
         _save(c, st);
@@ -669,6 +667,11 @@ contract DeployMainnet is Script {
         // the house
         require(house.vault() == st.vault && house.revenueRouter() == st.router, "house wiring");
         require(house.converter() == st.converter && house.partnerRegistry() == st.partners, "house wiring 2");
+        // partners register permissionlessly into the default tier: its cut is every partner's
+        require(
+            PartnerRegistry(st.partners).tierCutBps(PartnerRegistry(st.partners).DEFAULT_TIER()) == FlipperDeploy.PARTNER_TIER1_CUT_BPS,
+            "partner default tier cut"
+        );
         require(house.isRouteAdapter(st.v4) && house.isRouteAdapter(st.v3), "route adapters");
         require(DiceEntropyAdapter(st.randomness).consumer() == st.house, "randomness bound");
         require(DiceEntropyAdapter(st.randomness).arbitrum() == !c.rehearsal, "ArbSys flag");

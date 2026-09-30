@@ -58,9 +58,7 @@ abstract contract PartnerBase is FlipperBase {
         super.setUp();
         registry = sys.partners;
         vm.prank(partnerController);
-        demoId = registry.register("demo", partnerPayout, 5000);
-        vm.prank(owner);
-        registry.approve(demoId, 1); // tier 1: 10% of expected profit
+        demoId = registry.register("demo", partnerPayout, 5000); // active at once, in the default tier (20%)
     }
 
     function _suffix(string memory codes) internal pure returns (bytes memory) {
@@ -124,10 +122,11 @@ contract PartnerTest is PartnerBase {
         vm.expectRevert(PartnerRegistry.InvalidParams.selector);
         registry.register("x", partnerPayout, 10_001);
         uint256 id = registry.register("app-1_x", partnerPayout, 0);
-        assertEq(uint8(registry.partner(id).status), uint8(PartnerRegistry.Status.Pending));
+        assertEq(uint8(registry.partner(id).status), uint8(PartnerRegistry.Status.Approved), "active at once");
+        assertEq(registry.partner(id).tier, registry.DEFAULT_TIER());
         vm.prank(mallory);
         vm.expectRevert();
-        registry.approve(id, 3);
+        registry.approve(id, 3); // re-tiering stays the owner's
         vm.prank(mallory);
         vm.expectRevert(PartnerRegistry.NotController.selector);
         registry.setPayout(id, mallory);
@@ -139,7 +138,7 @@ contract PartnerTest is PartnerBase {
     function test_resolve_erc8021_vectors() public {
         (uint256 id, uint256 cut, uint256 disc) = registry.resolve(alice, _suffix("demo"));
         assertEq(id, demoId);
-        assertEq(cut, 1000);
+        assertEq(cut, 2000, "the default tier: 20% of expected profit");
         assertEq(disc, 5000);
         // several codes: the first approved one wins
         (id,,) = registry.resolve(alice, _suffix("nobody,demo"));
@@ -173,11 +172,48 @@ contract PartnerTest is PartnerBase {
         registry.setSuspended(demoId, true);
         (id,,) = registry.resolve(alice, _suffix("demo"));
         assertEq(id, 0, "suspended");
+        // a new code needs no approval
         vm.prank(partnerController);
-        uint256 pending = registry.register("pend", partnerPayout, 0);
-        (id,,) = registry.resolve(alice, _suffix("pend"));
-        assertEq(id, 0, "pending");
-        pending;
+        uint256 fresh = registry.register("fresh", partnerPayout, 0);
+        (id,,) = registry.resolve(alice, _suffix("fresh"));
+        assertEq(id, fresh, "active at once");
+    }
+
+    /// Anyone can partner: a stranger's code attributes flips at once, at the default tier's cut. The owner can still
+    /// change that cut for everyone, re-tier one partner, or suspend a code.
+    function test_registration_is_permissionless() public {
+        address stranger = makeAddr("stranger");
+        vm.prank(stranger);
+        uint256 id = registry.register("stranger-app", stranger, 0);
+        uint256 f = _flipWith(alice, address(tokenT), 1_000_000 ether, _suffix("stranger-app"));
+        (uint256 pid, uint256 share) = _tag(f);
+        assertEq(pid, id, "attributed without approval");
+        assertGt(share, 0);
+        (, uint256 cut,) = registry.resolve(alice, _suffix("stranger-app"));
+        assertEq(cut, 2000);
+
+        uint8 dflt = registry.DEFAULT_TIER();
+        vm.prank(owner);
+        registry.setTierCut(dflt, 1500); // the default cut, for every partner in it
+        (, cut,) = registry.resolve(alice, _suffix("stranger-app"));
+        assertEq(cut, 1500);
+        (, cut,) = registry.resolve(alice, _suffix("demo"));
+        assertEq(cut, 1500);
+
+        vm.startPrank(owner);
+        registry.setTierCut(2, 3000);
+        registry.approve(id, 2); // one partner re-tiered
+        vm.stopPrank();
+        (, cut,) = registry.resolve(alice, _suffix("stranger-app"));
+        assertEq(cut, 3000);
+
+        vm.prank(owner);
+        registry.setSuspended(id, true);
+        (pid,,) = registry.resolve(alice, _suffix("stranger-app"));
+        assertEq(pid, 0, "suspended");
+        vm.prank(stranger);
+        vm.expectRevert(PartnerRegistry.CodeTaken.selector);
+        registry.register("stranger-app", stranger, 0); // the code stays taken
     }
 
     // ── pricing ──────────────────────────────────────────────────────────────────────────────────────────
@@ -185,16 +221,16 @@ contract PartnerTest is PartnerBase {
     function test_partner_flip_gets_better_odds_and_emits() public {
         uint256 plain = _flip(alice, address(tokenT), 1_000_000 ether);
         uint256 base = _winChance(plain);
-        // E = 10000 − h − 2·p; C = 10% E; D = 50% C; odds + D/2; the partner keeps C − D
+        // E = 10000 − h − 2·p; C = 20% E; D = 50% C; odds + D/2; the partner keeps C − D
         (,,,,,,,, uint128 s, uint128 b,,) = house.flips(plain);
         uint256 h = Math.mulDiv(b - s, BPS, uint256(b) + s, Math.Rounding.Ceil);
         uint256 e = BPS - h - 2 * base;
-        uint256 c = e * 1000 / BPS;
+        uint256 c = e * 2000 / BPS;
         uint256 bonus = c * 5000 / BPS * BPS / (2 * BPS);
         assertGt(bonus, 0);
         uint256 expectedId = house.nextFlipId();
         vm.expectEmit(true, true, false, true, address(house));
-        emit FlipperHouseBase.FlipPartner(expectedId, demoId, 1000, 5000, bonus, c - bonus * 2);
+        emit FlipperHouseBase.FlipPartner(expectedId, demoId, 2000, 5000, bonus, c - bonus * 2);
         uint256 id = _flipWith(alice, address(tokenT), 1_000_000 ether, _suffix("demo"));
         assertEq(id, expectedId);
         assertEq(_winChance(id), base + bonus, "odds + D/2");

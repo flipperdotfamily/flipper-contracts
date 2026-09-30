@@ -313,10 +313,9 @@ abstract contract SimBase is Test {
         // USDG lists permissionlessly (a trusted token on its own ETH pool)
         try v4.registerAndList(address(usdg), usdgKey) {} catch {} // (already listed on a deployed stack)
 
-        // a second partner: tier 2, no discount
+        // a second partner: registered permissionlessly (the default tier), no discount
         vm.prank(partnerCtl);
         p2Id = partners.register("p2", partnerPayout, 0);
-        _exec(address(partners), abi.encodeCall(PartnerRegistry.approve, (p2Id, 2)));
 
         _makeActors();
         startSqrtP = _sqrtP();

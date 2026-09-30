@@ -44,7 +44,7 @@ pointing at `deployments/rehearsal.*`.
 | Contract | Role |
 |---|---|
 | `FlipperHouse` | Escrow, pricing, bankroll accounting, randomness callback and settlement (the hot path). Its cold paths run in `house/HouseModule` by delegatecall behind one-line stubs, so its ABI is whole (see "House layout") |
-| `PartnerRegistry` | Partner codes (ERC-8021 attribution), payouts, tiers and discounts; approval-gated (see "Partners") |
+| `PartnerRegistry` | Partner codes (ERC-8021 attribution), payouts, tiers and discounts; permissionless registration (see "Partners") |
 | `base/V4SwapEngine` | Multi-hop Uniswap v4 exact-in/exact-out swaps and revert-based quotes. Every call is gas-capped and wrapped in `try`, so it never reverts |
 | `randomness/DiceEntropyAdapter` | Dice Protocol randomness (DiceEntropy, a Pyth Entropy v2 fork): prompt first deliveries settle normally, anything later or recovered settles in safe mode (see "Randomness") |
 | `randomness/PythEntropyAdapter` / `ChainlinkVRFAdapter` | The same interface for Pyth Entropy v2 and Chainlink VRF v2.5 deployments |
@@ -343,13 +343,14 @@ back to their players as better odds.
   bounded-returndata staticcall; a failing, reverting, gas-burning or return-bombing registry means "no partner"
   and the flip goes on at normal odds. The same suffix on a `previewFlip` eth_call (from the player) previews the
   partner odds.
-- **Registration** is approval-gated: anyone `register`s a code (1–32 of [a-z0-9_-]) with a payout and a discount;
-  the owner `approve`s it into a tier, and may re-tier, suspend, or allow self-attribution. The controller changes
-  payout / discount. A player can't attribute their own flips (player = payout or controller) unless allowed.
+- **Registration** is permissionless: anyone `register`s a code (1–32 of [a-z0-9_-]) with a payout and a discount,
+  and it is active at once in `DEFAULT_TIER` (1). The owner may change a tier's cut (`setTierCut`: the default tier's
+  cut is every new partner's), re-tier a partner (`approve`), suspend it, or allow self-attribution. The controller
+  changes payout / discount. A player can't attribute their own flips (player = payout or controller) unless allowed.
 - **Pricing**, fixed at flip time: `E` = the flip's expected house profit (bps of value); the tier cut
   `C = tierCut·E`, capped so that `E − C ≥ minHouseEdgeBps`; the discount `D = C·discount` goes to the player as
-  win chance (+D/2 on token flips, +D/payout on $FLIPPER flips); the partner keeps `A = C − D`. Default tiers: 10%,
-  20%, 30% of `E` (at most 50%).
+  win chance (+D/2 on token flips, +D/payout on $FLIPPER flips); the partner keeps `A = C − D`. The default tier's cut at launch: 20%
+  of `E` (any tier at most 50%).
 - **Accrual**: like the holder share, on a losing flip only, scaled by 1/P(loss): the partner gets `A` of the
   flip's mid value, the rest of the expected profit splits between holders and the bankroll as before, so the cut
   comes out of both halves proportionally, and all shares together never exceed the loss's proceeds.

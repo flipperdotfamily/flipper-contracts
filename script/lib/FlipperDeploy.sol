@@ -76,9 +76,9 @@ library FlipperDeploy {
     uint96 internal constant HARVEST_BOUNTY_CAP_ETH = 0.005 ether;
     uint256 internal constant HARVEST_BOUNTY_CAP_SUPPLY_DIV = 1_000_000;
     /// partner tiers: share of an attributed flip's expected house profit (capped so the house keeps its floor)
-    uint16 internal constant PARTNER_TIER1_CUT_BPS = 1000;
-    uint16 internal constant PARTNER_TIER2_CUT_BPS = 2000;
-    uint16 internal constant PARTNER_TIER3_CUT_BPS = 3000;
+    /// partners register permissionlessly into PartnerRegistry.DEFAULT_TIER (1): its cut, 20% of each flip's expected
+    /// house profit, is every partner's until the owner changes it (setTierCut) or re-tiers one (approve)
+    uint16 internal constant PARTNER_TIER1_CUT_BPS = 2000;
     /// ETH revenue waits for at least this much before it is auctioned
     uint128 internal constant MIN_LOT_ETH = 0.001 ether;
 
@@ -263,8 +263,6 @@ library FlipperDeploy {
             proxy(address(new PartnerRegistry()), c.proxyAdminOwner, abi.encodeCall(PartnerRegistry.initialize, (c.deployer)))
         );
         s.partners.setTierCut(1, PARTNER_TIER1_CUT_BPS);
-        s.partners.setTierCut(2, PARTNER_TIER2_CUT_BPS);
-        s.partners.setTierCut(3, PARTNER_TIER3_CUT_BPS);
         s.house.setPartnerRegistry(address(s.partners));
     }
 

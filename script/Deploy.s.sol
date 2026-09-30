@@ -213,7 +213,7 @@ contract Deploy is Script {
 
         // a sample partner for the showcase / web: code "demo", tier 1, half its cut returned to players as odds
         // (payout: the deployer, so the deployer's own flips don't attribute to it)
-        s.partners.approve(s.partners.register("demo", e.deployer, 5000), 1);
+        s.partners.register("demo", e.deployer, 5000); // active at once, in the default tier
 
         // 3. bankroll: any protocol-owned seed first (bootstrapped 1:1 as POL, so no later depositor pays a fee on
         //    it), the vault's parameters, then the team's opening buy staked for good through the PrincipalLock

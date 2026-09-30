@@ -174,10 +174,12 @@ contract KellyTest is PartnerBase {
             _checkCap(viaP, tokens[i], share);
             assertLt(viaP.maxLiability, plain.maxLiability, "a partner flip gets a smaller cap");
         }
-        // a bigger cut (tier 3: 30% of the edge) shrinks it further
+        // a bigger cut (tier 3 at 30% of the edge, above the default tier's 20%) shrinks it further
         FlipperHouseBase.Preview memory t1 = _preview(alice, address(t0), amt, sfx);
-        vm.prank(owner);
+        vm.startPrank(owner);
+        registry.setTierCut(3, 3000);
         registry.approve(demoId, 3);
+        vm.stopPrank();
         FlipperHouseBase.Preview memory t3 = _preview(alice, address(t0), amt, sfx);
         _checkCap(t3, address(t0), _share(alice, address(t0), amt, sfx));
         assertLt(t3.maxLiability, t1.maxLiability);

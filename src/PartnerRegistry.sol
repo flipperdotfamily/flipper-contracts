@@ -7,20 +7,22 @@ import {Ownable2StepUpgradeable} from "@openzeppelin/contracts-upgradeable/acces
 /// @notice Partners (wallets, apps, widgets) that bring flips to the house earn a share of each attributed flip's
 ///         expected profit, part of which they can hand back to their players as better odds.
 ///
-///   - Registration is approval-gated: anyone registers a code (`register`), the owner approves it into a tier
-///     (`approve`), and may re-tier or suspend it later. Each tier's cut (`tierCutBps`) is a share of the flip's
-///     expected house profit; the house caps it so its own edge never drops below `minHouseEdgeBps`.
+///   - Registration is permissionless: anyone registers a code (`register`) and it is active at once, in
+///     `DEFAULT_TIER`. The owner may re-tier it (`approve`), suspend it, or change a tier's cut (`setTierCut`: the
+///     default tier's cut is every new partner's). Each tier's cut (`tierCutBps`) is a share of the flip's expected
+///     house profit; the house caps it so its own edge never drops below `minHouseEdgeBps`.
 ///   - The partner's controller sets the payout address and `discountBps`: the share of the cut returned to the
 ///     player as win chance. Changes apply to new flips only (the house captures everything at flip time).
 ///   - Attribution: flips carry an ERC-8021 data suffix after their arguments — `codes ‖ codesLength (1 byte) ‖
 ///     schemaId (1 byte) ‖ 0x80218021802180218021802180218021`, schema 0: ASCII codes separated by commas. The
-///     house hands that tail to `resolve`; the first approved code wins. A player can't attribute their own flips
-///     (player == payout or controller) unless the owner allows it for that partner.
+///     house hands that tail to `resolve`; the first active (Approved) code wins. A player can't attribute their own
+///     flips (player == payout or controller) unless the owner allows it for that partner.
 ///   - The registry holds no funds: the house accrues each partner's share and pays it to the payout address
 ///     (`FlipperHouse.claimPartner`).
 ///
 ///   Deployed behind a TransparentUpgradeableProxy; storage is append-only.
 contract PartnerRegistry is Ownable2StepUpgradeable {
+    /// `Approved` is active (every code from registration on); `Pending` is no longer assigned (kept for the ABI)
     enum Status {
         None,
         Pending,
@@ -43,6 +45,8 @@ contract PartnerRegistry is Ownable2StepUpgradeable {
     uint256 public constant MAX_CODE_LENGTH = 32;
     /// the most a tier may take of a flip's expected house profit
     uint16 public constant MAX_TIER_CUT_BPS = 5000;
+    /// the tier every code registers into (its cut: `tierCutBps[DEFAULT_TIER]`, 20% at launch)
+    uint8 public constant DEFAULT_TIER = 1;
 
     Partner[] internal _partners; // id = index + 1
     mapping(bytes32 codeHash => uint256 id) public idOfCode;
@@ -75,7 +79,8 @@ contract PartnerRegistry is Ownable2StepUpgradeable {
     // Partners
     // ─────────────────────────────────────────────────────────────────────────────────────────────────────
 
-    /// @notice Register `code` (1–32 chars of [a-z0-9_-]) with the caller as controller. Starts Pending.
+    /// @notice Register `code` (1–32 chars of [a-z0-9_-]) with the caller as controller. Active at once, in
+    ///         `DEFAULT_TIER`: no approval needed.
     function register(string calldata code, address payout, uint16 discountBps) external returns (uint256 id) {
         bytes memory c = bytes(code);
         if (c.length == 0 || c.length > MAX_CODE_LENGTH) revert InvalidCode();
@@ -87,10 +92,11 @@ contract PartnerRegistry is Ownable2StepUpgradeable {
         bytes32 h = keccak256(c);
         if (idOfCode[h] != 0) revert CodeTaken();
         if (payout == address(0) || discountBps > BPS) revert InvalidParams();
-        _partners.push(Partner(msg.sender, payout, discountBps, 0, Status.Pending, false, code));
+        _partners.push(Partner(msg.sender, payout, discountBps, DEFAULT_TIER, Status.Approved, false, code));
         id = _partners.length;
         idOfCode[h] = id;
         emit PartnerRegistered(id, code, msg.sender, payout, discountBps);
+        emit PartnerApproved(id, DEFAULT_TIER);
     }
 
     function setPayout(uint256 id, address payout) external {
@@ -119,6 +125,7 @@ contract PartnerRegistry is Ownable2StepUpgradeable {
     // Owner
     // ─────────────────────────────────────────────────────────────────────────────────────────────────────
 
+    /// @notice Move a partner to `tier` (and reinstate it if it was suspended).
     function approve(uint256 id, uint8 tier) external onlyOwner {
         Partner storage p = _partner(id);
         p.tier = tier;

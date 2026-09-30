@@ -57,6 +57,7 @@ contract PartnerInvariantTest is PartnerBase {
         ids.push(registry.register("pb", makeAddr("payB"), 10_000));
         vm.stopPrank();
         vm.startPrank(owner);
+        registry.setTierCut(2, 3000); // only the default tier (1) has a cut out of the box
         registry.approve(ids[1], 2);
         registry.approve(ids[2], 3);
         registry.setTierCut(3, 5000);
