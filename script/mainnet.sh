@@ -415,7 +415,10 @@ print(json.dumps(d))" "${SITE_SETTINGS_JSON:-}" "$browser" 2>/dev/null) || {
       # via-IR bytecode depends on every source compiled with it, so forge verify-contract (the contract's own imports
       # only) doesn't reproduce it: verify-sourcify.py submits each build's exact input. (script/verify.sh still
       # does Etherscan, given an Etherscan key: ETHERSCAN_API_KEY=… script/verify.sh --only etherscan …)
-      env -u ETHERSCAN_API_KEY python3 script/verify-sourcify.py --chain "$chain" "${files[@]}" || {
+      # Blockscout imports a Sourcify match once the contract is requested through its PRO API (a proapi_… key)
+      local bs="${BLOCKSCOUT_API_KEY:-}"
+      [[ -z "$bs" && "${ETHERSCAN_API_KEY:-}" == proapi_* ]] && bs="$ETHERSCAN_API_KEY"
+      env -u ETHERSCAN_API_KEY BLOCKSCOUT_API_KEY="$bs" python3 script/verify-sourcify.py --chain "$chain" "${files[@]}" || {
         red "verification incomplete: run 'script/mainnet.sh verify' again later (already-verified contracts are skipped)"; return 1; }
       mark_done verify ;;
     *)

@@ -11,6 +11,9 @@ from the compiler cache: the build's source list (out/build-info/<id>.json), the
 
   script/verify-sourcify.py [--chain 4663] [--dry-run] [--extra <addr>=<src>:<Contract>@<profile>]... <broadcast *.json>...
 
+With BLOCKSCOUT_API_KEY (a Blockscout PRO API key, proapi_…), it then asks Blockscout for each contract through the PRO
+API, which makes Blockscout import the Sourcify match (it doesn't on its own until a contract is requested there).
+
 --extra names a contract whose creation isn't in the broadcast records (an interrupted run's file is overwritten by the
 next one); Sourcify reads its code from the chain, so only the source and the compilation profile are needed.
 """
@@ -145,7 +148,29 @@ def main():
             err = r.get("error") or {}
             print(f"  FAIL {addr} {label}: {err.get('customCode') or 'pending'} {str(err.get('message', ''))[:160]}")
     print(f"{len(todo)} matched, {len(unmatched)} unmatched, {failed} failed")
+    key = os.environ.get("BLOCKSCOUT_API_KEY", "")
+    if key and not args.dry_run:
+        blockscout(args.chain, key, [t[0] for t in todo])
     sys.exit(1 if failed else 0)
+
+
+def blockscout(chain, key, addrs, rounds=8, wait=45):
+    """ask Blockscout (PRO API) for each contract until it shows as verified: each request makes it import the Sourcify
+    match. Imports land over minutes; whatever is left imports the same way later (run again)."""
+    base = f"https://api.blockscout.com/{chain}/api/v2/smart-contracts"
+    pending = list(addrs)
+    for rnd in range(rounds):
+        left = []
+        for a in pending:
+            st, j = http("GET", f"{base}/{a}?apikey={key}")
+            if not (st == 200 and j.get("is_verified")):
+                left.append(a)
+        pending = left
+        print(f"  blockscout: {len(addrs) - len(pending)}/{len(addrs)} verified")
+        if not pending:
+            return
+        time.sleep(wait)
+    print(f"  blockscout: {len(pending)} still importing (run again later): {' '.join(pending)}")
 
 
 if __name__ == "__main__":
