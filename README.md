@@ -202,7 +202,8 @@ The exact form costs a few hundred gas more than the "EV per unit of liability" 
 $FLIPPER pays holder rewards itself, in $FLIPPER, to every eligible balance: no staking, no
 snapshots, no keeper, no owner.
 
-- **Where it comes from.** Half of every flip's expected profit (`rewardsShareBps`, skimmed from losses into
+- **Where it comes from.** A share of every flip's expected profit (`rewardsShareBps`, an owner setting; 50% at
+  deployment, 25% on Robinhood Chain from 30 Sept 2026; skimmed from losses into
   `house.rewardsAccrued`) and the protocol-owned pool's LP fees, both collected by anyone's `router.harvest()` and
   handed to `token.distribute(amount)`.
 - **Streaming.** `distribute(amount)` adds to the stream without ever slowing it: the rate becomes the larger of the
