@@ -21,7 +21,7 @@
 #   acceptUnlocker the API's operator key accepts the drawdown breaker's unlocker role
 #   check          every role, owner and setting asserted onchain (read-only)
 #   live           the API is active and sending, /v1/site serves the deployment (and the web, with WEB_URL)
-#   verify         source verification (Sourcify → Blockscout, Etherscan)
+#   verify         source verification on Sourcify (Blockscout imports it), with each contract's full compiler input
 #   pin            the deployment written into the SDK: its default addresses (FLIPPER_ADDRESSES, sdk/src/addresses.ts)
 #                  and the canonical house + lens (CANONICAL_DEPLOYMENTS, sdk/src/deployments.ts)
 #   release        the npm packages (@flipperdotfamily/*: sdk, widget, react, vue, svelte, angular, react-native):
@@ -406,13 +406,16 @@ print(json.dumps(d))" "${SITE_SETTINGS_JSON:-}" "$browser" 2>/dev/null) || {
       echo "   main repo: $(git -C "$ROOT" rev-parse --short HEAD) pushed"
       mark_done record ;;
     verify)
-      bold "── verify (Sourcify → Blockscout, Blockscout, Etherscan)"
+      bold "── verify (Sourcify, with each contract's full compiler input; Blockscout imports Sourcify matches)"
       local chain; chain=$(cast chain-id --rpc-url "$RPC_URL")
       if [[ "$chain" != 4663 ]]; then echo "   chain $chain isn't Robinhood Chain: nothing to verify (rehearsal)"; mark_done verify; return 0; fi
       local files=()
-      while IFS= read -r f; do files+=(--broadcast "$f"); done < <(ls broadcast/DeployMainnet.s.sol/"$chain"/*.json 2>/dev/null | grep -v -e '-latest\.json' || true)
+      while IFS= read -r f; do files+=("$f"); done < <(ls broadcast/DeployMainnet.s.sol/"$chain"/*.json 2>/dev/null || true)
       [[ ${#files[@]} -gt 0 ]] || { red "no broadcast files under broadcast/DeployMainnet.s.sol/$chain"; return 1; }
-      RPC_URL="$RPC_URL" CHAIN_ID="$chain" script/verify.sh "${files[@]}" --manifest "$MANIFEST_FILE" || {
+      # via-IR bytecode depends on every source compiled with it, so forge verify-contract (the contract's own imports
+      # only) doesn't reproduce it: verify-sourcify.py submits each build's exact input. (script/verify.sh still
+      # does Etherscan, given an Etherscan key: ETHERSCAN_API_KEY=… script/verify.sh --only etherscan …)
+      env -u ETHERSCAN_API_KEY python3 script/verify-sourcify.py --chain "$chain" "${files[@]}" || {
         red "verification incomplete: run 'script/mainnet.sh verify' again later (already-verified contracts are skipped)"; return 1; }
       mark_done verify ;;
     *)
