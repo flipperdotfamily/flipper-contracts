@@ -294,6 +294,18 @@ contract PrincipalLockTest is FlipperBase {
         lock.sweepVaultRewards();
     }
 
+    /// a withdrawal pays at the rounded-down price, which lifts the price by a few units; that rounding must not be
+    /// charged as a performance gain, or the position left behind is a unit under the principal and a maximal
+    /// request can never be withdrawn (fuzz counterexample: loss 2.087e18, then gain 37,951,397.05e18)
+    function test_max_request_withdraws_at_a_rounding_edge() public {
+        _loss(2087360703432121615);
+        _gain(37951397046791215319139916);
+        uint256 x = lock.withdrawableExcess();
+        uint256 got = _takeExcess(); // reverted with PrincipalBreach(P - 1, P) before
+        assertLe(got, x);
+        assertGe(lock.value(), P);
+    }
+
     // ── fuzz ─────────────────────────────────────────────────────────────────────────────────────────
 
     /// the excess is exactly max(0, value − P), a maximal withdrawal never takes the value under P, and asking for

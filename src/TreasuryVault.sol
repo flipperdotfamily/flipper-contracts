@@ -183,6 +183,7 @@ contract TreasuryVault is ERC20Upgradeable, Ownable2StepUpgradeable, ReentrancyG
         house.depositTreasury(assets);
 
         _mint(msg.sender, shares);
+        _markRounding();
         uint256 until = Math.max(unlockAt[msg.sender], block.timestamp + lockDuration);
         unlockAt[msg.sender] = until;
         emit Deposit(msg.sender, assets, shares, until);
@@ -232,6 +233,7 @@ contract TreasuryVault is ERC20Upgradeable, Ownable2StepUpgradeable, ReentrancyG
         delete pending[msg.sender];
         _burn(msg.sender, p.shares);
         if (assets != 0) house.withdrawTreasury(msg.sender, assets);
+        _markRounding();
         emit Withdraw(msg.sender, assets, p.shares);
         _syncRewardToken();
     }
@@ -255,6 +257,16 @@ contract TreasuryVault is ERC20Upgradeable, Ownable2StepUpgradeable, ReentrancyG
         if (a.bootstrap) emit Bootstrapped(a.assets);
         if (a.crystallized) emit Crystallized(a.assets, a.pps, a.feeAssets, a.feeShares);
         return (a.assets, a.shares);
+    }
+
+    /// @dev Deposits mint and withdrawals pay at the rounded-down price, which leaves the price a few units higher.
+    ///      That is rounding, not performance: move the mark up to it so the next accrual charges no fee on it (a
+    ///      fee minted with its rounding up would otherwise take a unit from every depositor).
+    function _markRounding() internal {
+        uint256 s = totalSupply() + protocolShares;
+        if (s == 0) return;
+        uint256 p = Math.mulDiv(house.treasury(), PPS_SCALE, s);
+        if (p > hwm) hwm = p;
     }
 
     function _accrue() internal view returns (Accrual memory a) {
